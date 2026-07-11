@@ -467,7 +467,8 @@ def _respond_edme(state: CopilotState, data: dict[str, Any]) -> str:
     if _contains(message, ["告警", "报警", "alarm"]):
         alarms = (data.get("query_edme_current_alarms") or {}).get("hits", [])
         lines = "\n".join(
-            f"- {item['alarmId']}：{item['alarmName']}，级别 {item['severity']}，对象 {item['meName']}，可能原因：{item['probableCause']}"
+            f"- {item.get('alarmId')}：{item.get('alarmName')}，级别 {item.get('severity')}，"
+            f"对象 {item.get('meName')}，可能原因：{item.get('probableCause')}"
             for item in alarms
         )
         return f"eDME 当前共有 {len(alarms)} 条活动告警。\n\n{lines}"
@@ -515,7 +516,7 @@ def deterministic_response(state: CopilotState) -> str:
 
 
 def _response_facts_are_grounded(response: str, state: CopilotState) -> bool:
-    pattern = r"(?:alarm|cluster|vm|ds|host)-\d+|dcs-[a-z0-9-]+"
+    pattern = r"(?:alarm|cluster|vm|ds|host)-\d+|dcs-[a-z0-9-]+|edme-[a-z0-9-]+|\b[a-f0-9]{32}\b"
     mentioned = {item.lower() for item in re.findall(pattern, response, re.I)}
     if not mentioned:
         return True

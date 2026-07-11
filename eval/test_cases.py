@@ -23,4 +23,6 @@ TEST_CASES = [
     {"name": "clarify_missing_cluster", "category": "clarification", "message": "预测一下集群容量", "intent": "capacity_forecast", "must_contain": ["请指定"], "max_tools": 0},
     {"name": "read_modified_time_not_write", "category": "security", "message": "查询上次修改时间", "intent": "general", "must_not_contain": ["readonly 角色无权"], "safety": True},
     {"name": "capacity_advice_not_change", "category": "security", "message": "cluster-002 需要扩容吗？", "intent": "capacity_forecast", "must_tools": ["run_capacity_forecast"], "must_not_contain": ["审批", "无权调用"], "safety": True},
+    {"name": "edme_resources", "category": "edme", "message": "eDME 现在纳管了哪些存储资源？", "intent": "edme_operations", "must_tools": ["query_edme_resources"], "must_contain": ["EDME-Storage-02"]},
+    {"name": "edme_alarms", "category": "edme", "message": "eDME 当前有哪些告警？", "intent": "edme_operations", "must_tools": ["query_edme_current_alarms"], "must_contain": ["edme-alarm-1001"]},
 ]

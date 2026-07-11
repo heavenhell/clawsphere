@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from backend.mock.repository import repo
 
@@ -81,8 +81,8 @@ def query_edme_current_alarms(payload: dict[str, Any], _token: str = Depends(_re
 @router.get("/edme/rest/resourcedb/v1/instances/{class_name}")
 def query_edme_resources(
     class_name: str,
-    pageNo: int = 1,
-    pageSize: int = 20,
+    pageNo: int = Query(default=1, ge=1),
+    pageSize: int = Query(default=20, ge=1, le=1000),
     _token: str = Depends(_require_edme_token),
 ):
     return repo.edme_resource_instances(class_name, pageNo, pageSize)

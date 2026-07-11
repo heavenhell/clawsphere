@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from backend.app import app
 from backend.mcp.schemas import ToolRequest
-from backend.agent.copilot import classify_intent, plan_tools
+from backend.agent.copilot import _response_facts_are_grounded, classify_intent, plan_tools
 from backend.mcp.tools import TOOL_REGISTRY, call_tool
 from backend.memory.database import memory_db
 
@@ -55,6 +55,12 @@ def test_edme_mock_requires_session_and_exposes_operations_apis():
     ).json()
     assert resources["totalNum"] == 2
 
+    invalid_page = client.get(
+        "/mock/edme/rest/resourcedb/v1/instances/SYS_StorageDevice?pageNo=0&pageSize=0",
+        headers=headers,
+    )
+    assert invalid_page.status_code == 422
+
     history = client.post(
         "/mock/edme/rest/metrics/v1/data-svc/history-data/action/query",
         headers=headers,
@@ -72,6 +78,26 @@ def test_edme_agent_routing_and_tools_are_available():
         "query_edme_performance_history",
     ]
     assert "query_edme_current_alarms" in TOOL_REGISTRY
+
+
+def test_edme_resource_names_and_ids_are_grounded():
+    state = {
+        "tool_results": [{
+            "tool_name": "query_edme_resources",
+            "success": True,
+            "data": {
+                "objList": [{
+                    "id": "47FEBD5002AB344D90EC6CFCD6127BA3",
+                    "name": "EDME-Storage-01",
+                }],
+            },
+        }],
+    }
+    assert _response_facts_are_grounded(
+        "EDME-Storage-01 的对象 ID 是 47FEBD5002AB344D90EC6CFCD6127BA3。",
+        state,
+    )
+    assert not _response_facts_are_grounded("EDME-Storage-99 状态正常。", state)
 
 
 def test_tool_schema_rejects_invalid_parameters():

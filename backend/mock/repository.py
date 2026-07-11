@@ -79,9 +79,12 @@ class MockRepository(FusionComputeInterface, DoradoInterface, EDMEInterface):
         alarms = self._load("edme-alarms.json")
         if severity is not None:
             alarms = [alarm for alarm in alarms if alarm.get("severity") == severity]
+        # The demo dataset fits in one page, so no continuation iterator is emitted.
         return {"hits": alarms, "iterator": None, "resCode": 1}
 
     def edme_resource_instances(self, class_name: str, page_no: int = 1, page_size: int = 20):
+        if page_no < 1 or not 1 <= page_size <= 1000:
+            raise ValueError("page_no must be >= 1 and page_size must be between 1 and 1000")
         resources = self._load("edme-resources.json").get(class_name, [])
         start = (page_no - 1) * page_size
         page = resources[start:start + page_size]
