@@ -1,0 +1,20 @@
+[
+  {
+    "id": "host-001",
+    "name": "fc-host-01",
+    "cluster_id": "cluster-001",
+    "management_ip": "10.20.1.11",
+    "status": "normal",
+    "cpu_usage": 0.58,
+    "memory_usage": 0.67
+  },
+  {
+    "id": "host-005",
+    "name": "fc-edge-02",
+    "cluster_id": "cluster-002",
+    "management_ip": "10.20.2.12",
+    "status": "warning",
+    "cpu_usage": 0.91,
+    "memory_usage": 0.84
+  }
+]

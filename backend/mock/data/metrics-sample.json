@@ -1,0 +1,242 @@
+[
+  {
+    "metric_id": "board_mfg",
+    "metric_name": "主板制造商",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 7,
+    "unit": ""
+  },
+  {
+    "metric_id": "board_prod",
+    "metric_name": "主板型号",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 14,
+    "unit": ""
+  },
+  {
+    "metric_id": "board_serial",
+    "metric_name": "主板序列号",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 21,
+    "unit": ""
+  },
+  {
+    "metric_id": "board_version",
+    "metric_name": "主板版本号",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 28,
+    "unit": ""
+  },
+  {
+    "metric_id": "product_mfg",
+    "metric_name": "服务器制造商",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 35,
+    "unit": ""
+  },
+  {
+    "metric_id": "product_name",
+    "metric_name": "服务器型号",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 42,
+    "unit": ""
+  },
+  {
+    "metric_id": "product_serial",
+    "metric_name": "服务器序列号",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 49,
+    "unit": ""
+  },
+  {
+    "metric_id": "product_version",
+    "metric_name": "服务器版本号",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 56,
+    "unit": ""
+  },
+  {
+    "metric_id": "product_uuid",
+    "metric_name": "服务器标识",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 63,
+    "unit": ""
+  },
+  {
+    "metric_id": "product_wakeup_type",
+    "metric_name": "服务器唤醒方式",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 70,
+    "unit": ""
+  },
+  {
+    "metric_id": "cpu_info",
+    "metric_name": "CPU信息",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 77,
+    "unit": ""
+  },
+  {
+    "metric_id": "cpu_total",
+    "metric_name": "CPU总频率",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 84,
+    "unit": "GHz"
+  },
+  {
+    "metric_id": "cpu_num",
+    "metric_name": "CPU数量",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 91,
+    "unit": ""
+  },
+  {
+    "metric_id": "device_memory",
+    "metric_name": "内存信息",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 98,
+    "unit": ""
+  },
+  {
+    "metric_id": "mem_locator_num",
+    "metric_name": "内存槽数",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 5,
+    "unit": ""
+  },
+  {
+    "metric_id": "mem_size",
+    "metric_name": "总容量",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 12,
+    "unit": "MB"
+  },
+  {
+    "metric_id": "bios_release_date",
+    "metric_name": "发布日期",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 19,
+    "unit": ""
+  },
+  {
+    "metric_id": "bios_version",
+    "metric_name": "版本号",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 26,
+    "unit": ""
+  },
+  {
+    "metric_id": "bios_rom_size",
+    "metric_name": "ROM大小",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 33,
+    "unit": ""
+  },
+  {
+    "metric_id": "bios_vendor",
+    "metric_name": "供应商",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 40,
+    "unit": ""
+  },
+  {
+    "metric_id": "nic_info",
+    "metric_name": "网口信息",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 47,
+    "unit": ""
+  },
+  {
+    "metric_id": "nic_num",
+    "metric_name": "网口数量",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 54,
+    "unit": ""
+  },
+  {
+    "metric_id": "cpu_usage",
+    "metric_name": "CPU占用率",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 61,
+    "unit": ""
+  },
+  {
+    "metric_id": "dom0_cpu_usage",
+    "metric_name": "Dom0的CPU占用率",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 68,
+    "unit": "%"
+  },
+  {
+    "metric_id": "hosts_cpu_cores",
+    "metric_name": "CPU核数",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 75,
+    "unit": "核"
+  },
+  {
+    "metric_id": "hosts_cpu_speed_total",
+    "metric_name": "CPU总频率",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 82,
+    "unit": "GHz"
+  },
+  {
+    "metric_id": "domU_cpu_speed_total",
+    "metric_name": "domU的CPU总频率",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 89,
+    "unit": "GHz"
+  },
+  {
+    "metric_id": "dom0_mem_usage",
+    "metric_name": "Dom0的内存占用率",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 96,
+    "unit": "%"
+  },
+  {
+    "metric_id": "mem_usage",
+    "metric_name": "内存占用率",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 3,
+    "unit": "%"
+  },
+  {
+    "metric_id": "nic_dynamic_info",
+    "metric_name": "网口性能信息",
+    "object_id": "host-001",
+    "timestamp": "2026-07-04T20:15:00+04:00",
+    "value": 10,
+    "unit": ""
+  }
+]

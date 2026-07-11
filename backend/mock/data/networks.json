@@ -1,0 +1,14 @@
+[
+  {
+    "id": "net-001",
+    "name": "DCS-MGMT",
+    "vlan": 120,
+    "status": "normal"
+  },
+  {
+    "id": "net-002",
+    "name": "DCS-SERVICE",
+    "vlan": 210,
+    "status": "normal"
+  }
+]

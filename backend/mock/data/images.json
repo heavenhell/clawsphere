@@ -1,0 +1,16 @@
+[
+  {
+    "id": "img-001",
+    "name": "EulerOS-DCS-base",
+    "status": "active",
+    "visibility": "private",
+    "size_gb": 18
+  },
+  {
+    "id": "img-002",
+    "name": "Windows-maintenance",
+    "status": "active",
+    "visibility": "shared",
+    "size_gb": 45
+  }
+]

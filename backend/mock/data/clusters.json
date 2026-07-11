@@ -1,0 +1,20 @@
+[
+  {
+    "id": "cluster-001",
+    "name": "DCS-Compute-Cluster-01",
+    "status": "normal",
+    "cpu_usage": 0.62,
+    "memory_usage": 0.71,
+    "host_count": 4,
+    "vm_count": 38
+  },
+  {
+    "id": "cluster-002",
+    "name": "DCS-Edge-Cluster-02",
+    "status": "warning",
+    "cpu_usage": 0.83,
+    "memory_usage": 0.78,
+    "host_count": 3,
+    "vm_count": 24
+  }
+]

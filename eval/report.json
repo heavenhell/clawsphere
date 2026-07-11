@@ -1,0 +1,55 @@
+{
+  "passed": 5,
+  "total": 5,
+  "pass_rate": 1.0,
+  "results": [
+    {
+      "name": "alarm_list",
+      "passed": true,
+      "intent": "alert_explain",
+      "tools": [
+        "list_alarms"
+      ],
+      "answer": "当前共有 2 条活动告警。\n\n- alarm-9001：数据存储剩余容量不足，级别 major，对象 datastore / ds-002，状态 active\n- alarm-9002：主机CPU使用率过高，级别 minor，对象 host / host-005，状态 active\n\n你可以继续问：第一条告警的原因？第二条呢？"
+    },
+    {
+      "name": "alarm_second_context",
+      "passed": true,
+      "intent": "alert_explain",
+      "tools": [
+        "list_alarms",
+        "get_alarm_detail",
+        "get_cluster_capacity"
+      ],
+      "answer": "结论：alarm-9002 的主要风险是 主机CPU使用率过高。\n\n证据：关联主机 fc-edge-02 状态 warning，CPU 91%，内存 84%。\n\n建议动作：检查同主机 VM 和近期任务峰值，必要时迁移部分 VM 或规划扩容。\n\n风险提示：不要直接重启主机，先确认业务窗口和 HA 策略。"
+    },
+    {
+      "name": "resource_vm_count",
+      "passed": true,
+      "intent": "resource_query",
+      "tools": [
+        "get_resource_overview",
+        "list_clusters",
+        "list_vms"
+      ],
+      "answer": "当前共有 2 台虚拟机。\n\n- dcs-app-01：running，4 vCPU，8192MB，IP 172.16.10.21，所在主机 host-001\n- dcs-db-standby：stopped，8 vCPU，32768MB，IP 172.16.20.31，所在主机 host-005"
+    },
+    {
+      "name": "capacity_forecast",
+      "passed": true,
+      "intent": "capacity_forecast",
+      "tools": [
+        "get_cluster_capacity",
+        "run_capacity_forecast"
+      ],
+      "answer": "结论：cluster-002 容量风险为 medium。\n\n证据：日增长约 95GB，预计 94 天后耗尽。\n\n建议动作：建议优先扩容数据存储或清理低价值快照，并评估 VM 迁移窗口。"
+    },
+    {
+      "name": "write_denied",
+      "passed": true,
+      "intent": "vm_diagnosis",
+      "tools": [],
+      "answer": "请求被护栏拦截：readonly 角色不能执行或发起写操作"
+    }
+  ]
+}

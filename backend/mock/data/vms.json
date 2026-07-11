@@ -1,0 +1,20 @@
+[
+  {
+    "id": "vm-1001",
+    "name": "dcs-app-01",
+    "status": "running",
+    "host_id": "host-001",
+    "cpu": 4,
+    "memory_mb": 8192,
+    "ip": "172.16.10.21"
+  },
+  {
+    "id": "vm-1024",
+    "name": "dcs-db-standby",
+    "status": "stopped",
+    "host_id": "host-005",
+    "cpu": 8,
+    "memory_mb": 32768,
+    "ip": "172.16.20.31"
+  }
+]

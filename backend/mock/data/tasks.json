@@ -1,0 +1,9 @@
+[
+  {
+    "id": "task-20260704-0001",
+    "name": "重启虚拟机 dcs-app-01",
+    "status": "running",
+    "progress": 45,
+    "created_at": "2026-07-04T20:10:00+04:00"
+  }
+]

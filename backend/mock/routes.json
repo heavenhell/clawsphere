@@ -1,0 +1,7095 @@
+[
+  {
+    "id": "post_v1_0_project_id_kms_list_keys",
+    "name": "密钥列表",
+    "method": "POST",
+    "path": "/v1.0/{project_id}/kms/list-keys",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_project_id_kms_create_key",
+    "name": "密钥创建",
+    "method": "POST",
+    "path": "/v1.0/{project_id}/kms/create-key",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_project_id_kms_update_key_text",
+    "name": "修改密钥别名及描述",
+    "method": "POST",
+    "path": "/v1.0/{project_id}/kms/update-key-text",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_project_id_kms_enable_key",
+    "name": "启用密钥",
+    "method": "POST",
+    "path": "/v1.0/{project_id}/kms/enable-key",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_project_id_kms_disable_key",
+    "name": "禁用密钥",
+    "method": "POST",
+    "path": "/v1.0/{project_id}/kms/disable-key",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_project_id_kms_schedule_key_deletion",
+    "name": "计划删除密钥",
+    "method": "POST",
+    "path": "/v1.0/{project_id}/kms/schedule-key-deletion",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_project_id_kms_cancel_key_deletion",
+    "name": "取消计划删除密钥",
+    "method": "POST",
+    "path": "/v1.0/{project_id}/kms/cancel-key-deletion",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_project_id_kms_enable_key_rotation",
+    "name": "开启密钥轮转",
+    "method": "POST",
+    "path": "/v1.0/{project_id}/kms/enable-key-rotation",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_project_id_kms_disable_key_rotation",
+    "name": "关闭密钥轮转",
+    "method": "POST",
+    "path": "/v1.0/{project_id}/kms/disable-key-rotation",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_project_id_kms_update_key_rotation_interval",
+    "name": "修改密钥轮换周期",
+    "method": "POST",
+    "path": "/v1.0/{project_id}/kms/update-key-rotation-interval",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "na_v1_0_project_id_kms_aksks_list",
+    "name": "查询AKSK列表",
+    "method": "GET",
+    "path": "/v1.0/{project_id}/kms/aksks/list",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_project_id_kms_aksks",
+    "name": "AKSK创建",
+    "method": "POST",
+    "path": "/v1.0/{project_id}/kms/aksks",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_v1_0_project_id_kms_aksks_ak",
+    "name": "AKSK删除",
+    "method": "DELETE",
+    "path": "/v1.0/{project_id}/kms/aksks/{ak}",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_project_id_kms_aksks_enable",
+    "name": "AKSK启用",
+    "method": "POST",
+    "path": "/v1.0/{project_id}/kms/aksks/enable",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_project_id_kms_aksks_disable",
+    "name": "AKSK禁用",
+    "method": "POST",
+    "path": "/v1.0/{project_id}/kms/aksks/disable",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_project_id_kms_aksks_reset",
+    "name": "AKSK重置",
+    "method": "POST",
+    "path": "/v1.0/{project_id}/kms/aksks/reset",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_kms_config_hsm",
+    "name": "配置加密机",
+    "method": "POST",
+    "path": "/v1.0/kms/config-hsm",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_v1_0_kms_config_hsm_state",
+    "name": "查询加密机配置状态",
+    "method": "GET",
+    "path": "/v1.0/kms/config-hsm-state",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_v1_0_kms_start_switch",
+    "name": "加密机模式切换",
+    "method": "POST",
+    "path": "/v1.0/kms/start-switch",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_v1_0_kms_switch_state",
+    "name": "查询加密机模式切换状态",
+    "method": "GET",
+    "path": "/v1.0/kms/switch-state",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_v1_0_project_id_kms_info",
+    "name": "查询KMS配置信息",
+    "method": "GET",
+    "path": "/v1.0/{project_id}/kms/info",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_v1_0_project_id_kms_hsm_info",
+    "name": "查询兼容的加密机厂商及型号",
+    "method": "GET",
+    "path": "/v1.0/{project_id}/kms/hsm-info",
+    "source": "FusionCompute 8.10.0 KMS加密机接口参考.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_vm_uri_vm_id_action_migrate",
+    "name": "Rest接口使用说明",
+    "method": "POST",
+    "path": "/{vm_uri}/{vm_id}/action/migrate",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_1_hosts",
+    "name": "添加主机",
+    "method": "GET",
+    "path": "/service/sites/1/hosts",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_hosts",
+    "name": "设置主机用户态交换的规格",
+    "method": "GET",
+    "path": "/service/sites/1/hosts",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_477a0728_tasks_885",
+    "name": "配置主机资源",
+    "method": "GET",
+    "path": "/service/sites/477A0728/tasks/885",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_477a0728_tasks_885",
+    "name": "配置主机大页",
+    "method": "GET",
+    "path": "/service/sites/477A0728/tasks/885",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_477a0728_tasks_885",
+    "name": "主机操作系统故障恢复",
+    "method": "GET",
+    "path": "/service/sites/477A0728/tasks/885",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_hosts",
+    "name": "设置主机eVol存储用户态I/O栈的规格",
+    "method": "GET",
+    "path": "/service/sites/1/hosts",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_hosts",
+    "name": "设置主机分布式存储用户态I/O栈的规格",
+    "method": "GET",
+    "path": "/service/sites/1/hosts",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1",
+    "name": "创建主机自定义规范",
+    "method": "GET",
+    "path": "/service/sites/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1",
+    "name": "修改主机自定义规范",
+    "method": "GET",
+    "path": "/service/sites/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1",
+    "name": "删除主机自定义规范",
+    "method": "GET",
+    "path": "/service/sites/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1",
+    "name": "查询主机自定义规范",
+    "method": "GET",
+    "path": "/service/sites/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_hosts",
+    "name": "批量设置主机高性能属性规格",
+    "method": "GET",
+    "path": "/service/sites/1/hosts",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "put_service_sites_site_id_hosts_action_config",
+    "name": "设置主机配置项",
+    "method": "PUT",
+    "path": "/service/sites/{site_id}/hosts/action/config",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_service_sites_site_id_hosts_action_configration_limit_100_offset_0_key_vimsbackupdatastore",
+    "name": "查询主机配置项",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/hosts/action/configration?limit=100&offset=0&key=vimsBackupDatastore",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "post_vm_uri_vm_id_action_migrate",
+    "name": "迁移虚拟机",
+    "method": "POST",
+    "path": "/{vm_uri}/{vm_id}/action/migrate",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_1_vms_i_12345678",
+    "name": "查询虚拟机信息",
+    "method": "GET",
+    "path": "/service/sites/1/vms/i-12345678",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_tasks_1",
+    "name": "挂载光驱",
+    "method": "GET",
+    "path": "/service/sites/1/tasks/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_tasks_1",
+    "name": "卸载光驱",
+    "method": "GET",
+    "path": "/service/sites/1/tasks/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_vms_1_nics_1",
+    "name": "添加网卡",
+    "method": "GET",
+    "path": "/service/sites/1/vms/1/nics/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_vms_1_nics_1",
+    "name": "配置网卡网络信息",
+    "method": "GET",
+    "path": "/service/sites/1/vms/1/nics/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "put_sites_site_id_vsps_vsp_id",
+    "name": "设置网卡限速",
+    "method": "PUT",
+    "path": "/sites/{site_id}/vsps/{vsp_id}",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_40860795_tasks_i_00000003",
+    "name": "在线修改端口组",
+    "method": "GET",
+    "path": "/service/sites/40860795/tasks/i-00000003",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_40860795_tasks_i_00000003",
+    "name": "配置安全组",
+    "method": "GET",
+    "path": "/service/sites/40860795/tasks/i-00000003",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_clusters_1",
+    "name": "将虚拟机克隆为模板，模板克隆为模板，模板部署虚拟机，模板创建链接克隆虚拟机，创建容灾演练虚拟机",
+    "method": "GET",
+    "path": "/service/sites/1/clusters/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_clusters_1",
+    "name": "批量克隆虚拟机",
+    "method": "GET",
+    "path": "/service/sites/1/clusters/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_vms",
+    "name": "解析ovf描述",
+    "method": "GET",
+    "path": "/service/sites/1/vms/",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_vms",
+    "name": "生成ovf描述",
+    "method": "GET",
+    "path": "/service/sites/1/vms/",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_tasks_1",
+    "name": "挂载软驱",
+    "method": "GET",
+    "path": "/service/sites/1/tasks/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_centosovf",
+    "name": "导入模板",
+    "method": "GET",
+    "path": "/service/centosovf",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_centosovf",
+    "name": "导出模板",
+    "method": "GET",
+    "path": "/service/centosovf",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_clusters_1_vms",
+    "name": "链接克隆虚拟机",
+    "method": "GET",
+    "path": "/service/sites/1/clusters/1/vms/",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "post_sites_site_id_vms_filterperformconfig",
+    "name": "批量查询虚拟机高性能属性配置",
+    "method": "POST",
+    "path": "/sites/{site_id}/vms/filterPerformConfig",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_vm_uri_vm_id_action_migratevol",
+    "name": "迁移单个虚拟机的数据存储",
+    "method": "POST",
+    "path": "/{vm_uri}/{vm_id}/action/migratevol",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_vm_uri_vm_id_action_hostandstoragemigrate",
+    "name": "整机迁移",
+    "method": "POST",
+    "path": "/{vm_uri}/{vm_id}/action/hostAndStorageMigrate",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_39130754_tasks_125",
+    "name": "设置虚拟机用户密码",
+    "method": "GET",
+    "path": "/service/sites/39130754/tasks/125",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_volumes_1",
+    "name": "创建并挂载磁盘",
+    "method": "GET",
+    "path": "/service/sites/1/volumes/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_2ef4110e_tasks_83279",
+    "name": "批量创建并挂载磁盘",
+    "method": "GET",
+    "path": "/service/sites/2EF4110E/tasks/83279",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_39130754_tasks_125",
+    "name": "虚拟机CPU绑定、解绑定",
+    "method": "GET",
+    "path": "/service/sites/39130754/tasks/125",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_39130754_tasks_125",
+    "name": "虚拟机PCI设备绑定、解绑定",
+    "method": "GET",
+    "path": "/service/sites/39130754/tasks/125",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_tasks_1",
+    "name": "虚拟机绑定、解绑定主机",
+    "method": "GET",
+    "path": "/service/sites/1/tasks/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_e3fc0ef8_hosts_176",
+    "name": "查询满足虚拟机迁移条件的目标主机列表",
+    "method": "GET",
+    "path": "/service/sites/E3FC0EF8/hosts/176",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_clusters_1_vms",
+    "name": "注册虚拟机",
+    "method": "GET",
+    "path": "/service/sites/1/clusters/1/vms/",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "get_sites_site_id_getallmaclist",
+    "name": "查询所有MAC列表",
+    "method": "GET",
+    "path": "/sites/{site_id}/getAllMacList",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "get_export_sites_site_id_exportmaclist",
+    "name": "导出所有MAC列表",
+    "method": "GET",
+    "path": "/export/sites/{site_id}/exportMacList",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "post_service_sites_site_id_macblacklist",
+    "name": "添加MAC地址黑名单",
+    "method": "POST",
+    "path": "/service/sites/{site_id}/macblacklist",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_service_sites_site_id_macblacklist",
+    "name": "查询MAC地址黑名单",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/macblacklist",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "delete_service_sites_site_id_macblacklist",
+    "name": "清空MAC黑名单",
+    "method": "DELETE",
+    "path": "/service/sites/{site_id}/macblacklist",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_service_sites_site_id_snapshot_action_multi_create",
+    "name": "批量虚拟机创建快照",
+    "method": "POST",
+    "path": "/service/sites/{site_id}/snapshot/action/multi-create",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_service_sites_site_id_snapshot_action_multi_delete",
+    "name": "批量虚拟机删除快照",
+    "method": "POST",
+    "path": "/service/sites/{site_id}/snapshot/action/multi-delete",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_2ef4110e_tasks_83279",
+    "name": "配置磁盘的空间回收",
+    "method": "GET",
+    "path": "/service/sites/2EF4110E/tasks/83279",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_2ef4110e_tasks_83279",
+    "name": "配置虚拟机的空间回收",
+    "method": "GET",
+    "path": "/service/sites/2EF4110E/tasks/83279",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_site_id_vms_action_multi",
+    "name": "批量配置虚拟机的空间回收",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/vms/action/multi-",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_2ef4110e_tasks_83279",
+    "name": "配置虚拟机数据存储故障处理策略",
+    "method": "GET",
+    "path": "/service/sites/2EF4110E/tasks/83279",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_2ef4110e_tasks_83279",
+    "name": "批量配置虚拟机数据存储故障处理策略",
+    "method": "GET",
+    "path": "/service/sites/2EF4110E/tasks/83279",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_3c0207d5_clusters_10_drsrecommendations_589",
+    "name": "查询集群建议信息",
+    "method": "GET",
+    "path": "/service/sites/3C0207D5/clusters/10/drsrecommendations/589",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "na_service_sites_3c0207d5_clusters_10_drsrecommendations_584",
+    "name": "查询集群DRS历史建议",
+    "method": "GET",
+    "path": "/service/sites/3C0207D5/clusters/10/drsrecommendations/584",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "na_service_sites_3c0207d5_vms_i_00000002",
+    "name": "查询DRS故障",
+    "method": "GET",
+    "path": "/service/sites/3C0207D5/vms/i-00000002",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_drsrecommendation_uri_drsrecommendation_id_action_apply",
+    "name": "应用集群DRS建议",
+    "method": "POST",
+    "path": "/{drsrecommendation_uri}/{drsrecommendation_id}/action/apply",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_drsrecommendation_uri_action_apply",
+    "name": "应用多条集群DRS建议",
+    "method": "POST",
+    "path": "/{drsrecommendation_uri}/action/apply",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_3c0207d5_clusters_10_lbgroups_3208",
+    "name": "查询DRS均衡组",
+    "method": "GET",
+    "path": "/service/sites/3C0207D5/clusters/10/lbgroups/3208",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_3c0207d5_clusters_10_lbgroups_3208",
+    "name": "查询指定DRS均衡组",
+    "method": "GET",
+    "path": "/service/sites/3C0207D5/clusters/10/lbgroups/3208",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_service_sites_site_id_policies_drx_batch_delete",
+    "name": "批量删除DRX策略",
+    "method": "POST",
+    "path": "/service/sites/{site_id}/policies/drx/batch-delete",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_site_id_policies_drx_management_status",
+    "name": "批量启停策略",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/policies/drx/management-status",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_service_sites_site_id_policies_drx_offset_0_limit_5",
+    "name": "查询DRX策略列表",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/policies/drx?offset=0&limit=5",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_service_sites_site_id_policies_drx_policy_id",
+    "name": "查询策略详情",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/policies/drx/{policy_id}",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_site_id_policies_drx",
+    "name": "查询策略关联虚拟机",
+    "method": "GET",
+    "path": "/service/sites/{SITE_ID}/policies/drx/{",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "get_service_sites_site_id_policies_drx_associate_vms_limit_15_offset_5",
+    "name": "查询关联虚拟机列表",
+    "method": "GET",
+    "path": "/service/sites/{{SITE_ID}}/policies/drx/associate-vms?limit=15&offset=5",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_usbs_xxx",
+    "name": "查询USB设备信息",
+    "method": "GET",
+    "path": "/service/sites/1/usbs/XXX",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_433a06fd_folders_458",
+    "name": "查询文件夹列表",
+    "method": "GET",
+    "path": "/service/sites/433A06FD/folders/458",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_433a06fd_folders_458",
+    "name": "查询指定文件夹拓扑",
+    "method": "GET",
+    "path": "/service/sites/433A06FD/folders/458",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_1_tasks_759",
+    "name": "扫描指定主机存储适配器",
+    "method": "GET",
+    "path": "/service/sites/1/tasks/759",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_tasks_759",
+    "name": "添加存储资源",
+    "method": "GET",
+    "path": "/service/sites/1/tasks/759",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/datastores.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_tasks_759",
+    "name": "删除存储资源",
+    "method": "GET",
+    "path": "/service/sites/1/tasks/759",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/datastores.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_tasks_759",
+    "name": "刷新指定主机的存储设备",
+    "method": "GET",
+    "path": "/service/sites/1/tasks/759",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_tasks_759",
+    "name": "刷新指定主机的指定存储设备",
+    "method": "GET",
+    "path": "/service/sites/1/tasks/759",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_datastores_1",
+    "name": "创建数据存储",
+    "method": "GET",
+    "path": "/service/sites/1/datastores/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_datastores_1",
+    "name": "分页查询站点/主机/集群下所有数据存储",
+    "method": "GET",
+    "path": "/service/sites/1/datastores/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_datastores_1",
+    "name": "分页查询集群/主机下可模板部署的所有数据存储",
+    "method": "GET",
+    "path": "/service/sites/1/datastores/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_datastores_1",
+    "name": "查询指定数据存储",
+    "method": "GET",
+    "path": "/service/sites/1/datastores/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/datastores.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_tasks_759",
+    "name": "刷新数据存储",
+    "method": "GET",
+    "path": "/service/sites/1/tasks/759",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/datastores.json"
+    }
+  },
+  {
+    "id": "get_sites_site_id_datastores_sanvirexist",
+    "name": "查询集群中虚拟化san数据存储数量",
+    "method": "GET",
+    "path": "/sites/{site_id}/datastores/sanvirexist",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_datastores_1",
+    "name": "根据主机ID查询数据存储",
+    "method": "GET",
+    "path": "/service/sites/1/datastores/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "put_vimscluster_host_id",
+    "name": "修改VIMS集群节点编号",
+    "method": "PUT",
+    "path": "/vimsCluster/{host_id}",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_service_sites_site_id_datastore_cluster_entermaintenancemode_datastoreid",
+    "name": "数据存储进入维护模式",
+    "method": "POST",
+    "path": "/service/sites/{site_id}/datastore-cluster/enterMaintenanceMode/{datastoreId}",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_service_sites_site_id_datastore_cluster_exitmaintenancemode_datastoreid",
+    "name": "数据存储退出维护模式",
+    "method": "POST",
+    "path": "/service/sites/{site_id}/datastore-cluster/exitMaintenanceMode/{datastoreId}",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_site_id_datastore_cluster_querystoragepool",
+    "name": "查询文件夹下的数据存储和数据存储集群",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/datastore-cluster/querystoragepool?",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_volumes_1",
+    "name": "创建卷",
+    "method": "GET",
+    "path": "/service/sites/1/volumes/1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/datastores.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_tasks_759",
+    "name": "删除卷",
+    "method": "GET",
+    "path": "/service/sites/1/tasks/759",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/datastores.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_tasks_759",
+    "name": "卷导入镜像",
+    "method": "GET",
+    "path": "/service/sites/1/tasks/759",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/datastores.json"
+    }
+  },
+  {
+    "id": "na_service_sites_1_tasks_759",
+    "name": "卷导出镜像",
+    "method": "GET",
+    "path": "/service/sites/1/tasks/759",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/datastores.json"
+    }
+  },
+  {
+    "id": "na_service_sites_site_id_vms_action_batchexpandvol",
+    "name": "扩容共享卷",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/vms/action/batchexpandvol",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/datastores.json"
+    }
+  },
+  {
+    "id": "get_service_sites_site_id_clusters_dscluster_id",
+    "name": "查询指定数据存储集群概览",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/clusters/{dscluster_id}",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "get_service_sites_site_id_datastore_cluster_id_getsdrsdetail",
+    "name": "查询数据存储集群的配置信息",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/datastore-cluster/{id}/getSdrsDetail",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "na_service_sites_05c9108a_tasks_532",
+    "name": "更新DVSwitch",
+    "method": "GET",
+    "path": "/service/sites/05C9108A/tasks/532",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "low",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_00c50df4_tasks_206",
+    "name": "创建网络拨测任务",
+    "method": "GET",
+    "path": "/service/sites/00C50DF4/tasks/206",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_vms_vm_id_action_migrateniccheck",
+    "name": "迁移网络校验",
+    "method": "POST",
+    "path": "/sites/{site_id}/vms/{vm_id}/action/migrateNicCheck",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_site_id_linkdetection",
+    "name": "创建主动链路检测任务",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/linkdetection",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_site_id_linkdetection",
+    "name": "辅助学习",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/linkdetection",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_site_id_linkdetection",
+    "name": "更新主动链路检测任务",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/linkdetection",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_micro_seg_groups",
+    "name": "创建分组",
+    "method": "POST",
+    "path": "/sites/{site_id}/micro-seg/groups",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_sites_site_id_micro_seg_groups",
+    "name": "查询分组列表",
+    "method": "GET",
+    "path": "/sites/{site_id}/micro-seg/groups",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_micro_seg_groups_batch_delete",
+    "name": "批量删除分组",
+    "method": "POST",
+    "path": "/sites/{site_id}/micro-seg/groups/batch-delete",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_sites_site_id_micro_seg_groups_group_id",
+    "name": "更新分组名称和描述",
+    "method": "PUT",
+    "path": "/sites/{site_id}/micro-seg/groups/{group_id}",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_sites_site_id_micro_seg_groups_group_id_static_rules",
+    "name": "查询静态分组规则",
+    "method": "GET",
+    "path": "/sites/{site_id}/micro-seg/groups/{group_id}/static-rules",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_micro_seg_groups_group_id_static_rules",
+    "name": "批量添加静态分组规则",
+    "method": "POST",
+    "path": "/sites/{site_id}/micro-seg/groups/{group_id}/static-rules",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_micro_seg_groups_group_id_static_rules_batch_delete",
+    "name": "批量删除静态分组规则",
+    "method": "POST",
+    "path": "/sites/{site_id}/micro-seg/groups/{group_id}/static-rules/batch-delete",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_sites_site_id_micro_seg_groups_group_id_vnics",
+    "name": "查询分组下的虚拟网卡",
+    "method": "GET",
+    "path": "/sites/{site_id}/micro-seg/groups/{group_id}/vnics",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_micro_seg_strategies",
+    "name": "创建安全策略",
+    "method": "POST",
+    "path": "/sites/{site_id}/micro-seg/strategies",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_sites_site_id_micro_seg_strategies",
+    "name": "查询安全策略列表",
+    "method": "GET",
+    "path": "/sites/{site_id}/micro-seg/strategies",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_micro_seg_strategies_batch_delete",
+    "name": "批量删除安全策略",
+    "method": "POST",
+    "path": "/sites/{site_id}/micro-seg/strategies/batch-delete",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_sites_site_id_micro_seg_strategies_strategy_id",
+    "name": "更新安全策略名称和描述",
+    "method": "PUT",
+    "path": "/sites/{site_id}/micro-seg/strategies/{strategy_id}",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_sites_site_id_micro_seg_strategies_priority",
+    "name": "批量更新安全策略优先级",
+    "method": "PUT",
+    "path": "/sites/{site_id}/micro-seg/strategies/priority",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_micro_seg_services",
+    "name": "创建服务",
+    "method": "POST",
+    "path": "/sites/{site_id}/micro-seg/services",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_sites_site_id_micro_seg_services",
+    "name": "查询服务列表",
+    "method": "GET",
+    "path": "/sites/{site_id}/micro-seg/services",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_micro_seg_services_batch_delete",
+    "name": "批量删除服务",
+    "method": "POST",
+    "path": "/sites/{site_id}/micro-seg/services/batch-delete",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_sites_site_id_micro_seg_services_service_id",
+    "name": "更新服务",
+    "method": "PUT",
+    "path": "/sites/{site_id}/micro-seg/services/{service_id}",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_micro_seg_strategies_strategy_id_rules_direction",
+    "name": "创建安全规则",
+    "method": "POST",
+    "path": "/sites/{site_id}/micro-seg/strategies/{strategy_id}/rules/{direction}",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_micro_seg_strategies_strategy_id_rules_direction_batch_delete",
+    "name": "批量删除安全规则",
+    "method": "POST",
+    "path": "/sites/{site_id}/micro-seg/strategies/{strategy_id}/rules/{direction}/batch-delete",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_sites_site_id_micro_seg_strategies_strategy_id_rules_direction",
+    "name": "查询规则列表",
+    "method": "GET",
+    "path": "/sites/{site_id}/micro-seg/strategies/{strategy_id}/rules/{direction}",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "put_sites_site_id_micro_seg_strategies_strategy_id_rules_direction_priority",
+    "name": "批量更新安全规则优先级",
+    "method": "PUT",
+    "path": "/sites/{site_id}/micro-seg/strategies/{strategy_id}/rules/{direction}/priority",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_sites_site_id_micro_seg_strategies_strategy_id_rules_direction_rule_id",
+    "name": "更新安全规则",
+    "method": "PUT",
+    "path": "/sites/{site_id}/micro-seg/strategies/{strategy_id}/rules/{direction}/{rule_id}",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_micro_seg_strategies_strategy_id_rules",
+    "name": "批量创建安全规则",
+    "method": "POST",
+    "path": "/sites/{site_id}/micro-seg/strategies/{strategy_id}/rules",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_micro_seg_associate",
+    "name": "分组关联安全策略",
+    "method": "POST",
+    "path": "/sites/{site_id}/micro-seg/associate",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_micro_seg_disassociate",
+    "name": "分组和安全策略解关联",
+    "method": "POST",
+    "path": "/sites/{site_id}/micro-seg/disassociate",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_sites_site_id_micro_seg_associate",
+    "name": "查询分组和安全策略的关联关系",
+    "method": "GET",
+    "path": "/sites/{site_id}/micro-seg/associate",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_users_adddomain",
+    "name": "添加/修改域用户认证服务器",
+    "method": "POST",
+    "path": "/sites/{site_id}/users/addDomain",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_users",
+    "name": "添加用户",
+    "method": "POST",
+    "path": "/sites/{site_id}/users",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_users_id_setroles",
+    "name": "设置用户角色",
+    "method": "POST",
+    "path": "/sites/{site_id}/users/{id}/setRoles",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_sites_site_id_users_lockuser",
+    "name": "锁定用户",
+    "method": "POST",
+    "path": "/sites/{site_id}/users/lockUser",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_verificationcode",
+    "name": "获取验证码",
+    "method": "POST",
+    "path": "/verificationCode",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_verificationcode_verify",
+    "name": "验证验证码",
+    "method": "POST",
+    "path": "/verificationCode/verify",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "na_authenticate_authenticatebyaction",
+    "name": "鉴权接口",
+    "method": "GET",
+    "path": "/authenticate/authenticateByAction",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_snmp_uri_query",
+    "name": "查询SNMP配置信息",
+    "method": "GET",
+    "path": "/{snmp_uri}/query",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/alarms.json"
+    }
+  },
+  {
+    "id": "get_snmp_uri_queryall",
+    "name": "查询所有SNMP配置信息",
+    "method": "GET",
+    "path": "/{snmp_uri}/queryAll",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/alarms.json"
+    }
+  },
+  {
+    "id": "post_sites_site_id_sysconfig_setlogconfig",
+    "name": "配置日志转发规则",
+    "method": "POST",
+    "path": "/sites/{site_id}/sysconfig/setLogConfig",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_sites_site_id_sysconfig_getlogconfig",
+    "name": "查询日志转发规则",
+    "method": "GET",
+    "path": "/sites/{site_id}/sysconfig/getLogConfig",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "na_service_sites_site_id_vms_vm_id_vtpm",
+    "name": "挂载虚拟机的vtpm磁盘",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/vms/{vm_id}/vtpm",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sites_site_id_snapshots_snapshot_id_vtpm_nvram",
+    "name": "查询虚拟机快照的nvRAM文件内容",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/snapshots/{snapshot_id}/vtpm/nvram",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_site_id_vms_vm_id_vtpm_nvram",
+    "name": "修改虚拟机nvRAM文件",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/vms/{vm_id}/vtpm/nvram",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_sites_site_id_vms_vm_id_vtpm",
+    "name": "卸载虚拟机的vtpm磁盘",
+    "method": "GET",
+    "path": "/service/sites/{site_id}/vms/{vm_id}/vtpm",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "na_service_sdn_register_eventtype_eventtype1",
+    "name": "虚拟机生命周期事件上报",
+    "method": "GET",
+    "path": "/service/sdn/register?eventtype={eventtype1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "na_service_events_subscriber_eventtype_eventtype1",
+    "name": "订阅事件上报",
+    "method": "GET",
+    "path": "/service/events/subscriber?eventtype={eventtype1",
+    "source": "FusionCompute 8.10.0 VRM接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_alarm_silencerules_batch_delete",
+    "name": "删除规则",
+    "method": "POST",
+    "path": "/krm/v1/alarm/silencerules/batch-delete",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_alarm_silencerules_cluster_clusterid",
+    "name": "取消集群静默",
+    "method": "DELETE",
+    "path": "/krm/v1/alarm/silencerules/cluster/{clusterId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_alarm_silencerules_cluster_clusterid",
+    "name": "获取集群静默状态",
+    "method": "GET",
+    "path": "/krm/v1/alarm/silencerules/cluster/{clusterId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_alarm_silencerules_cluster",
+    "name": "设置集群静默",
+    "method": "POST",
+    "path": "/krm/v1/alarm/silencerules/cluster",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_alarm_silencerules_detail_detailid",
+    "name": "删除集群规则",
+    "method": "DELETE",
+    "path": "/krm/v1/alarm/silencerules/detail/{detailId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_alarm_silencerules_detail_detailid",
+    "name": "重试集群规则",
+    "method": "POST",
+    "path": "/krm/v1/alarm/silencerules/detail/{detailId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_alarm_silencerules_enable",
+    "name": "启用或者禁用规则",
+    "method": "POST",
+    "path": "/krm/v1/alarm/silencerules/enable",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_alarm_silencerules_ruleid",
+    "name": "查看规则详情",
+    "method": "GET",
+    "path": "/krm/v1/alarm/silencerules/{ruleId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_alarm_silencerules",
+    "name": "分页查询静默规则",
+    "method": "GET",
+    "path": "/krm/v1/alarm/silencerules",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_alarm_silencerules",
+    "name": "创建规则",
+    "method": "POST",
+    "path": "/krm/v1/alarm/silencerules",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_alarm_silencerules",
+    "name": "修改规则",
+    "method": "PUT",
+    "path": "/krm/v1/alarm/silencerules",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_helm_templates_projectid_index_yaml",
+    "name": "下载应用模板仓库的索引文件",
+    "method": "GET",
+    "path": "/krm/v1/app/helm/templates/{projectId}/index.yaml",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_helm_templates_projectid_apptemplateid_tgz_prov",
+    "name": "下载应用模板的prov文件",
+    "method": "GET",
+    "path": "/krm/v1/app/helm/templates/{projectId}/{appTemplateId}.tgz.prov",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_helm_templates_projectid_apptemplateid_tgz",
+    "name": "下载应用模板的chart包",
+    "method": "GET",
+    "path": "/krm/v1/app/helm/templates/{projectId}/{appTemplateId}.tgz",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_templates_category",
+    "name": "分页查询应用模板类别列表",
+    "method": "GET",
+    "path": "/krm/v1/app/templates/category",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_templates_kind",
+    "name": "查询应用模板格式列表",
+    "method": "GET",
+    "path": "/krm/v1/app/templates/kind",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_templates_versions",
+    "name": "查询应用模板版本列表",
+    "method": "GET",
+    "path": "/krm/v1/app/templates/versions",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_templates_apptemplateid_export",
+    "name": "导出应用模板",
+    "method": "GET",
+    "path": "/krm/v1/app/templates/{appTemplateId}/export",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_templates_apptemplateid_filelist",
+    "name": "查询应用模板的所有模板文件展示信息",
+    "method": "GET",
+    "path": "/krm/v1/app/templates/{appTemplateId}/fileList",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_templates_apptemplateid_file",
+    "name": "查询单个应用模板的模板文件或参数文件",
+    "method": "GET",
+    "path": "/krm/v1/app/templates/{appTemplateId}/file",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_app_templates_apptemplateid_files",
+    "name": "修改应用模板参数文件",
+    "method": "PUT",
+    "path": "/krm/v1/app/templates/{appTemplateId}/files",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_app_templates_apptemplateid",
+    "name": "删除应用模板",
+    "method": "DELETE",
+    "path": "/krm/v1/app/templates/{appTemplateId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_templates_apptemplateid",
+    "name": "查询应用模板详情",
+    "method": "GET",
+    "path": "/krm/v1/app/templates/{appTemplateId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_templates",
+    "name": "分页查询应用模板列表",
+    "method": "GET",
+    "path": "/krm/v1/app/templates",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_app_templates",
+    "name": "上传应用模板",
+    "method": "POST",
+    "path": "/krm/v1/app/templates",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_instances_deployedtemplate",
+    "name": "查询已部署过的应用模板",
+    "method": "GET",
+    "path": "/krm/v1/app/instances/deployedTemplate",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_app_instances_flush",
+    "name": "刷新应用实例",
+    "method": "POST",
+    "path": "/krm/v1/app/instances/flush",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_instances_templatevalue",
+    "name": "获取应用模板的参数文件内容",
+    "method": "GET",
+    "path": "/krm/v1/app/instances/templateValue",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_app_instances_upgrade",
+    "name": "通过应用模板升级实例",
+    "method": "POST",
+    "path": "/krm/v1/app/instances/upgrade",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_app_instances_instanceid_modify",
+    "name": "变更应用实例",
+    "method": "POST",
+    "path": "/krm/v1/app/instances/{instanceId}/modify",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_instances_instanceid_revisions_revision_file",
+    "name": "获取应用实例文件内容",
+    "method": "GET",
+    "path": "/krm/v1/app/instances/{instanceId}/revisions/{revision}/file",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_instances_instanceid_revisions_revision_files",
+    "name": "查询应用实例文件列表",
+    "method": "GET",
+    "path": "/krm/v1/app/instances/{instanceId}/revisions/{revision}/files",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_instances_instanceid_revisions",
+    "name": "查询应用实例历史版本列表",
+    "method": "GET",
+    "path": "/krm/v1/app/instances/{instanceId}/revisions",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_app_instances_instanceid_rollback",
+    "name": "回退应用实例",
+    "method": "POST",
+    "path": "/krm/v1/app/instances/{instanceId}/rollback",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_app_instances_instanceid",
+    "name": "删除应用实例",
+    "method": "DELETE",
+    "path": "/krm/v1/app/instances/{instanceId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_instances_instanceid",
+    "name": "查询单个应用实例详情",
+    "method": "GET",
+    "path": "/krm/v1/app/instances/{instanceId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_app_instances",
+    "name": "分页查询应用实例列表",
+    "method": "GET",
+    "path": "/krm/v1/app/instances",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_app_instances",
+    "name": "通过应用模板创建实例",
+    "method": "POST",
+    "path": "/krm/v1/app/instances",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_cluster_customnodes_scan",
+    "name": "节点扫描",
+    "method": "POST",
+    "path": "/krm/v1/cluster/customNodes/scan",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_cluster_clusterid_networkpool_id",
+    "name": "修改网络",
+    "method": "PUT",
+    "path": "/krm/v1/cluster/{clusterId}/networkPool/{id}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_networkpools_batch_update",
+    "name": "批量修改网络",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/networkPools/batch-update",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_batch_upgrade",
+    "name": "集群批量升级创建任务",
+    "method": "POST",
+    "path": "/krm/v1/clusters/batch-upgrade",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_upgrade",
+    "name": "查询集群可升级性",
+    "method": "GET",
+    "path": "/krm/v1/clusters/upgrade",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_downgrade",
+    "name": "创建集群降级任务",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/downgrade",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_upgrade_alarms",
+    "name": "获取影响升级的告警",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/upgrade/alarms",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/alarms.json"
+    }
+  },
+  {
+    "id": "delete_krm_v1_clusters_clusterid_upgrade_cancel",
+    "name": "取消升降级等待",
+    "method": "DELETE",
+    "path": "/krm/v1/clusters/{clusterId}/upgrade/cancel",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_clusters_clusterid_upgrade_confirm",
+    "name": "手动确认升级完成",
+    "method": "PUT",
+    "path": "/krm/v1/clusters/{clusterId}/upgrade/confirm",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_upgrade_info",
+    "name": "查询集群升级信息",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/upgrade/info",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_upgrade_rollback",
+    "name": "创建集群回滚任务",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/upgrade/rollback",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_upgrade_status",
+    "name": "查询升级自动确认完成时间",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/upgrade/status",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_upgrade",
+    "name": "创建单个集群升级任务",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/upgrade",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_flavorlimits",
+    "name": "查询节点规格限制",
+    "method": "GET",
+    "path": "/krm/v1/clusters/flavorLimits",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_flavors",
+    "name": "查询节点规格",
+    "method": "GET",
+    "path": "/krm/v1/clusters/flavors",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_certificates",
+    "name": "查询集群证书列表",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/certificates",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "put_krm_v1_clusters_clusterid_certificates",
+    "name": "更新k8s集群证书",
+    "method": "PUT",
+    "path": "/krm/v1/clusters/{clusterId}/certificates",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_dataconsistency",
+    "name": "集群数据一致性检查",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/dataConsistency",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "put_krm_v1_clusters_clusterid_dns",
+    "name": "修改dns",
+    "method": "PUT",
+    "path": "/krm/v1/clusters/{clusterId}/dns",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_events",
+    "name": "查询集群事件",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/events",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "put_krm_v1_clusters_clusterid_inneraccount",
+    "name": "更新内部账号密码",
+    "method": "PUT",
+    "path": "/krm/v1/clusters/{clusterId}/inneraccount",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_networks",
+    "name": "查询集群网络",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/networks",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_nodes_nodeid_replace",
+    "name": "替换集群节点",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/nodes/{nodeId}/replace",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_clusters_clusterid_ntp",
+    "name": "修改ntp",
+    "method": "PUT",
+    "path": "/krm/v1/clusters/{clusterId}/ntp",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_quorums",
+    "name": "查询集群仲裁信息",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/quorums",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "put_krm_v1_clusters_clusterid_quorums",
+    "name": "更新集群仲裁配置",
+    "method": "PUT",
+    "path": "/krm/v1/clusters/{clusterId}/quorums",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_workloadstatus",
+    "name": "查询集群工作负载状态",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/workloadStatus",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "delete_krm_v1_clusters_clusterid",
+    "name": "删除集群",
+    "method": "DELETE",
+    "path": "/krm/v1/clusters/{clusterId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid",
+    "name": "查询集群详情",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters",
+    "name": "查询集群列表",
+    "method": "GET",
+    "path": "/krm/v1/clusters",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters",
+    "name": "创建集群",
+    "method": "POST",
+    "path": "/krm/v1/clusters",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_endpoint",
+    "name": "获取集群连接认证信息",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/endpoint",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_kubeconfig",
+    "name": "下载集群端点认证凭据",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/kubeConfig",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "put_krm_v1_clusters_clusterid_kubeconfig",
+    "name": "更新集群端点信息",
+    "method": "PUT",
+    "path": "/krm/v1/clusters/{clusterId}/kubeConfig",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_kubectl",
+    "name": "下载集群kubectl",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/kubectl",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_nodepools_nodepoolid_resize",
+    "name": "设置节点池节点数量",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/nodepools/{nodepoolId}/resize",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_clusters_clusterid_nodepools_nodepoolid",
+    "name": "删除节点池",
+    "method": "DELETE",
+    "path": "/krm/v1/clusters/{clusterId}/nodepools/{nodepoolId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_nodepools_nodepoolid",
+    "name": "查询节点池详情",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/nodepools/{nodepoolId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_nodepools",
+    "name": "查询节点池列表",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/nodepools",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_nodepools",
+    "name": "创建节点池",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/nodepools",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_nodes_add",
+    "name": "纳管已有节点",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/nodes/add",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_clusters_clusterid_nodes_nodeid_annotations",
+    "name": "更新节点注解",
+    "method": "PUT",
+    "path": "/krm/v1/clusters/{clusterId}/nodes/{nodeId}/annotations",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_nodes_nodeid_cordon",
+    "name": "设置节点不可调度",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/nodes/{nodeId}/cordon",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_nodes_nodeid_drain",
+    "name": "排水节点",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/nodes/{nodeId}/drain",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_nodes_nodeid_fingerprint_confirm",
+    "name": "确定节点公钥指纹",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/nodes/{nodeId}/fingerprint/confirm",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_nodes_nodeid_fingerprint_refresh",
+    "name": "刷新节点公钥指纹",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/nodes/{nodeId}/fingerprint/refresh",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_clusters_clusterid_nodes_nodeid_labels",
+    "name": "更新节点标签",
+    "method": "PUT",
+    "path": "/krm/v1/clusters/{clusterId}/nodes/{nodeId}/labels",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_clusters_clusterid_nodes_nodeid_password",
+    "name": "修改节点密码",
+    "method": "PUT",
+    "path": "/krm/v1/clusters/{clusterId}/nodes/{nodeId}/password",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_nodes_nodeid_pods",
+    "name": "查询容器组",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/nodes/{nodeId}/pods",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_clusters_clusterid_nodes_nodeid_taints",
+    "name": "更新节点污点",
+    "method": "PUT",
+    "path": "/krm/v1/clusters/{clusterId}/nodes/{nodeId}/taints",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_nodes_nodeid_uncordon",
+    "name": "上线节点",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/nodes/{nodeId}/uncordon",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_clusters_clusterid_nodes_nodeid",
+    "name": "删除节点",
+    "method": "DELETE",
+    "path": "/krm/v1/clusters/{clusterId}/nodes/{nodeId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_nodes_nodeid",
+    "name": "查询节点详情",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/nodes/{nodeId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_nodes",
+    "name": "查询节点列表",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/nodes",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_registries_batch_delete",
+    "name": "移除第三方镜像仓",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/registries/batch-delete",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_registries_registryid",
+    "name": "查询第三方镜像仓详情",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/registries/{registryId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_clusterid_registries",
+    "name": "查询集群下第三方镜像仓列表",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{clusterId}/registries",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_registries",
+    "name": "集群中增加第三方镜像仓",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/registries",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_clusterid_webcli_file",
+    "name": "webcli上传文件",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{clusterId}/webcli/file",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_cluster_id_namespaces_yaml_name",
+    "name": "查询集群命名空间yaml",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{cluster_id}/namespaces/yaml/{name}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "delete_krm_v1_clusters_cluster_id_namespaces_name",
+    "name": "删除集群命名空间",
+    "method": "DELETE",
+    "path": "/krm/v1/clusters/{cluster_id}/namespaces/{name}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_cluster_id_namespaces_name",
+    "name": "查询集群命名空间详情",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{cluster_id}/namespaces/{name}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "put_krm_v1_clusters_cluster_id_namespaces_name",
+    "name": "修改集群命名空间",
+    "method": "PUT",
+    "path": "/krm/v1/clusters/{cluster_id}/namespaces/{name}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusters_cluster_id_namespaces",
+    "name": "查询集群命名空间列表",
+    "method": "GET",
+    "path": "/krm/v1/clusters/{cluster_id}/namespaces",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_clusters_cluster_id_namespaces",
+    "name": "创建集群命名空间",
+    "method": "POST",
+    "path": "/krm/v1/clusters/{cluster_id}/namespaces",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_config",
+    "name": "查询Krm配置项",
+    "method": "GET",
+    "path": "/krm/v1/config",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_contents_uploading",
+    "name": "查询内容库上传中的文件列表",
+    "method": "GET",
+    "path": "/krm/v1/contents/uploading",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_contents_contentid",
+    "name": "修改内容库",
+    "method": "PUT",
+    "path": "/krm/v1/contents/{contentId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_contents",
+    "name": "查询内容库列表",
+    "method": "GET",
+    "path": "/krm/v1/contents",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_contents_contentid_sws_batch_delete",
+    "name": "批量删除多个指定软件包的所有版本",
+    "method": "POST",
+    "path": "/krm/v1/contents/{contentId}/sws/batch-delete",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_contents_contentid_sws_details",
+    "name": "查询指定软件包版本列表",
+    "method": "GET",
+    "path": "/krm/v1/contents/{contentId}/sws/details",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_contents_contentid_sws_upload_cancel_fileid",
+    "name": "软件包文件取消上传",
+    "method": "DELETE",
+    "path": "/krm/v1/contents/{contentId}/sws/upload/cancel/{fileId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_contents_contentid_sws_upload_init",
+    "name": "软件包文件上传初始化",
+    "method": "POST",
+    "path": "/krm/v1/contents/{contentId}/sws/upload/init",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_contents_contentid_sws_upload_merge_fileid",
+    "name": "软件包文件分片合并",
+    "method": "POST",
+    "path": "/krm/v1/contents/{contentId}/sws/upload/merge/{fileId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_contents_contentid_sws_upload_retry_fileid",
+    "name": "软件包文件重传初始化",
+    "method": "POST",
+    "path": "/krm/v1/contents/{contentId}/sws/upload/retry/{fileId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_contents_contentid_sws_softwareid_versions_batch_delete",
+    "name": "批量删除指定软件包的多个版本",
+    "method": "POST",
+    "path": "/krm/v1/contents/{contentId}/sws/{softwareId}/versions/batch-delete",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_contents_contentid_sws",
+    "name": "查询软件包列表",
+    "method": "GET",
+    "path": "/krm/v1/contents/{contentId}/sws",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_contents_contentid_vms_batch_delete",
+    "name": "批量删除多个指定虚机镜像的所有版本",
+    "method": "POST",
+    "path": "/krm/v1/contents/{contentId}/vms/batch-delete",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_contents_contentid_vms_details",
+    "name": "查询指定虚机镜像版本列表",
+    "method": "GET",
+    "path": "/krm/v1/contents/{contentId}/vms/details",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "delete_krm_v1_contents_contentid_vms_upload_cancel_fileid",
+    "name": "虚机镜像包文件取消上传",
+    "method": "DELETE",
+    "path": "/krm/v1/contents/{contentId}/vms/upload/cancel/{fileId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_contents_contentid_vms_upload_init",
+    "name": "虚机镜像包文件上传初始化",
+    "method": "POST",
+    "path": "/krm/v1/contents/{contentId}/vms/upload/init",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_contents_contentid_vms_upload_merge_fileid",
+    "name": "虚机镜像包文件分片合并",
+    "method": "POST",
+    "path": "/krm/v1/contents/{contentId}/vms/upload/merge/{fileId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_contents_contentid_vms_upload_retry_fileid",
+    "name": "虚机镜像包文件重传初始化",
+    "method": "POST",
+    "path": "/krm/v1/contents/{contentId}/vms/upload/retry/{fileId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_contents_contentid_vms_vmimageid_versions_batch_delete",
+    "name": "批量删除指定虚机镜像的多个版本",
+    "method": "POST",
+    "path": "/krm/v1/contents/{contentId}/vms/{vmImageId}/versions/batch-delete",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_contents_contentid_vms",
+    "name": "查询虚机镜像列表",
+    "method": "GET",
+    "path": "/krm/v1/contents/{contentId}/vms",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_files_fileid_cancel",
+    "name": "取消分片文件上传",
+    "method": "POST",
+    "path": "/krm/v1/files/{fileId}/cancel",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_files_fileid_merge",
+    "name": "合并文件",
+    "method": "POST",
+    "path": "/krm/v1/files/{fileId}/merge",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_files_fileid_reset",
+    "name": "重置文件上传",
+    "method": "POST",
+    "path": "/krm/v1/files/{fileId}/reset",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_files_fileid_slice",
+    "name": "上传分片文件",
+    "method": "POST",
+    "path": "/krm/v1/files/{fileId}/slice",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_files",
+    "name": "初始化文件上传",
+    "method": "POST",
+    "path": "/krm/v1/files",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_images_available_images",
+    "name": "列举镜像命名空间",
+    "method": "GET",
+    "path": "/krm/v1/images/available-images",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_images_namespaces_batch_delete",
+    "name": "批量删除镜像命名空间",
+    "method": "POST",
+    "path": "/krm/v1/images/namespaces/batch-delete",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_images_namespaces_imgnamespaceid_tags_upload",
+    "name": "上传镜像版本",
+    "method": "POST",
+    "path": "/krm/v1/images/namespaces/{imgNamespaceId}/tags/upload",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_images_namespaces_imgnamespaceid_upload",
+    "name": "检查镜像命名空间权限",
+    "method": "GET",
+    "path": "/krm/v1/images/namespaces/{imgNamespaceId}/upload",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "delete_krm_v1_images_namespaces_imgnamespaceid",
+    "name": "删除镜像命名空间",
+    "method": "DELETE",
+    "path": "/krm/v1/images/namespaces/{imgNamespaceId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_images_namespaces_imgnamespaceid",
+    "name": "查询镜像命名空间",
+    "method": "GET",
+    "path": "/krm/v1/images/namespaces/{imgNamespaceId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "get_krm_v1_images_namespaces",
+    "name": "列举镜像命名空间",
+    "method": "GET",
+    "path": "/krm/v1/images/namespaces",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_images_namespaces",
+    "name": "创建镜像命名空间",
+    "method": "POST",
+    "path": "/krm/v1/images/namespaces",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_images_namespaces",
+    "name": "修改镜像命名空间",
+    "method": "PUT",
+    "path": "/krm/v1/images/namespaces",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_images_external_repositories_batch_delete",
+    "name": "批量删除第三方镜像仓库",
+    "method": "POST",
+    "path": "/krm/v1/images/external-repositories/batch-delete",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_images_external_repositories_ping",
+    "name": "测试第三方镜像仓库连通性(创建页面)",
+    "method": "POST",
+    "path": "/krm/v1/images/external-repositories/ping",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_images_external_repositories_repositoryid_ping",
+    "name": "测试第三方镜像仓库连通性(编辑页面)",
+    "method": "POST",
+    "path": "/krm/v1/images/external-repositories/{repositoryId}/ping",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_images_external_repositories_repositoryid",
+    "name": "删除第三方镜像仓库",
+    "method": "DELETE",
+    "path": "/krm/v1/images/external-repositories/{repositoryId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_images_external_repositories_repositoryid",
+    "name": "查询第三方镜像仓库详情",
+    "method": "GET",
+    "path": "/krm/v1/images/external-repositories/{repositoryId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "put_krm_v1_images_external_repositories_repositoryid",
+    "name": "修改第三方镜像仓库",
+    "method": "PUT",
+    "path": "/krm/v1/images/external-repositories/{repositoryId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_images_external_repositories",
+    "name": "查询第三方镜像仓库列表",
+    "method": "GET",
+    "path": "/krm/v1/images/external-repositories",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_images_external_repositories",
+    "name": "创建第三方镜像仓库",
+    "method": "POST",
+    "path": "/krm/v1/images/external-repositories",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_images_external_repositories_repositoryid_strategies_batch_delete",
+    "name": "批量删除镜像同步策略",
+    "method": "POST",
+    "path": "/krm/v1/images/external-repositories/{repositoryId}/strategies/batch-delete",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_images_external_repositories_repositoryid_strategies_batch_exec",
+    "name": "批量执行镜像同步策略",
+    "method": "POST",
+    "path": "/krm/v1/images/external-repositories/{repositoryId}/strategies/batch-exec",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_images_external_repositories_repositoryid_strategies_strategyid_exec",
+    "name": "执行镜像同步策略",
+    "method": "POST",
+    "path": "/krm/v1/images/external-repositories/{repositoryId}/strategies/{strategyId}/exec",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_images_external_repositories_repositoryid_strategies_strategyid_status",
+    "name": "修改镜像同步策略状态",
+    "method": "PUT",
+    "path": "/krm/v1/images/external-repositories/{repositoryId}/strategies/{strategyId}/{status}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_images_external_repositories_repositoryid_strategies_strategyid",
+    "name": "删除镜像同步策略",
+    "method": "DELETE",
+    "path": "/krm/v1/images/external-repositories/{repositoryId}/strategies/{strategyId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_images_external_repositories_repositoryid_strategies_strategyid",
+    "name": "查询镜像同步策略详情",
+    "method": "GET",
+    "path": "/krm/v1/images/external-repositories/{repositoryId}/strategies/{strategyId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "put_krm_v1_images_external_repositories_repositoryid_strategies_strategyid",
+    "name": "修改镜像同步策略",
+    "method": "PUT",
+    "path": "/krm/v1/images/external-repositories/{repositoryId}/strategies/{strategyId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_images_external_repositories_repositoryid_strategies",
+    "name": "查询镜像同步策略列表",
+    "method": "GET",
+    "path": "/krm/v1/images/external-repositories/{repositoryId}/strategies",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_images_external_repositories_repositoryid_strategies",
+    "name": "创建镜像同步策略",
+    "method": "POST",
+    "path": "/krm/v1/images/external-repositories/{repositoryId}/strategies",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_images_garbage_collect_start",
+    "name": "启用镜像垃圾回收",
+    "method": "POST",
+    "path": "/krm/v1/images/garbage-collect/start",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_images_garbage_collect_stop",
+    "name": "禁用镜像垃圾回收",
+    "method": "DELETE",
+    "path": "/krm/v1/images/garbage-collect/stop",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_images_garbage_collect",
+    "name": "查询镜像垃圾回收策略",
+    "method": "GET",
+    "path": "/krm/v1/images/garbage-collect",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_images_namespaces_scan",
+    "name": "扫描特定命名空间下镜像漏洞",
+    "method": "POST",
+    "path": "/krm/v1/images/namespaces/scan",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_images_namespaces_namespaceid_images_scan",
+    "name": "扫描指定镜像仓库下的镜像漏洞",
+    "method": "POST",
+    "path": "/krm/v1/images/namespaces/{namespaceId}/images/scan",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_images_namespaces_namespaceid_images_imageid_scan",
+    "name": "扫描特定容器镜像",
+    "method": "POST",
+    "path": "/krm/v1/images/namespaces/{namespaceId}/images/{imageId}/scan",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_images_vulnerabilities_batch_delete",
+    "name": "删除镜像扫描报告",
+    "method": "POST",
+    "path": "/krm/v1/images/vulnerabilities/batch-delete",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_images_vulnerabilities_scanid",
+    "name": "删除镜像扫描报告",
+    "method": "DELETE",
+    "path": "/krm/v1/images/vulnerabilities/{scanId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_images_vulnerabilities_scanid",
+    "name": "查询镜像扫描漏洞报告详情",
+    "method": "GET",
+    "path": "/krm/v1/images/vulnerabilities/{scanId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "get_krm_v1_images_vulnerabilities",
+    "name": "列举镜像漏洞扫描报告",
+    "method": "GET",
+    "path": "/krm/v1/images/vulnerabilities",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_images_namespaces_namespaceid_repositories_batch_delete",
+    "name": "批量删除镜像仓库",
+    "method": "POST",
+    "path": "/krm/v1/images/namespaces/{namespaceId}/repositories/batch-delete",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_images_namespaces_namespaceid_repositories_repositoryid",
+    "name": "删除镜像仓库",
+    "method": "DELETE",
+    "path": "/krm/v1/images/namespaces/{namespaceId}/repositories/{repositoryId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_images_namespaces_namespaceid_repositories_repositoryid",
+    "name": "查询镜像仓库",
+    "method": "GET",
+    "path": "/krm/v1/images/namespaces/{namespaceId}/repositories/{repositoryId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "get_krm_v1_images_namespaces_namespaceid_repositories",
+    "name": "列举镜像仓库",
+    "method": "GET",
+    "path": "/krm/v1/images/namespaces/{namespaceId}/repositories",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_images_namespaces_namespaceid_repositories_repositoryid_tags_batch_delete",
+    "name": "批量删除镜像版本",
+    "method": "POST",
+    "path": "/krm/v1/images/namespaces/{namespaceId}/repositories/{repositoryId}/tags/batch-delete",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_images_namespaces_namespaceid_repositories_repositoryid_tags_upload",
+    "name": "上传镜像版本",
+    "method": "POST",
+    "path": "/krm/v1/images/namespaces/{namespaceId}/repositories/{repositoryId}/tags/upload",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_images_namespaces_namespaceid_repositories_repositoryid_tags_tagid",
+    "name": "删除镜像版本",
+    "method": "DELETE",
+    "path": "/krm/v1/images/namespaces/{namespaceId}/repositories/{repositoryId}/tags/{tagId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_images_namespaces_namespaceid_repositories_repositoryid_tags_tagid",
+    "name": "查询镜像版本",
+    "method": "GET",
+    "path": "/krm/v1/images/namespaces/{namespaceId}/repositories/{repositoryId}/tags/{tagId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "get_krm_v1_images_namespaces_namespaceid_repositories_repositoryid_tags",
+    "name": "列举镜像版本",
+    "method": "GET",
+    "path": "/krm/v1/images/namespaces/{namespaceId}/repositories/{repositoryId}/tags",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "get_krm_v1_images_registry",
+    "name": "查询镜像仓库地址",
+    "method": "GET",
+    "path": "/krm/v1/images/registry",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "get_krm_v1_images_vulner_db",
+    "name": "查询容器镜像漏洞库",
+    "method": "GET",
+    "path": "/krm/v1/images/vulner/db",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "put_krm_v1_images_vulner_db",
+    "name": "更新容器镜像漏洞库",
+    "method": "PUT",
+    "path": "/krm/v1/images/vulner/db",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_images_vulner_strategy",
+    "name": "查询容器镜像漏洞扫描策略",
+    "method": "GET",
+    "path": "/krm/v1/images/vulner/strategy",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "put_krm_v1_images_vulner_strategy",
+    "name": "配置容器镜像漏洞扫描策略",
+    "method": "PUT",
+    "path": "/krm/v1/images/vulner/strategy",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_metrics_history_batch_search",
+    "name": "批量获取历史指标",
+    "method": "POST",
+    "path": "/krm/v1/metrics/history/batch-search",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_metrics_history",
+    "name": "获取历史指标",
+    "method": "POST",
+    "path": "/krm/v1/metrics/history",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_metrics_realtime_batch_search",
+    "name": "批量获取多个对象的指标",
+    "method": "POST",
+    "path": "/krm/v1/metrics/realTime/batch-search",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_projects_resources_relations",
+    "name": "查询项目关联资源数量",
+    "method": "GET",
+    "path": "/krm/v1/projects/resources/relations",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_projects_projectid_cluster_batch_bind",
+    "name": "绑定项目与集群",
+    "method": "POST",
+    "path": "/krm/v1/projects/{projectId}/cluster/batch-bind",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_projects_projectid_cluster_batch_unbind",
+    "name": "解绑项目与集群",
+    "method": "POST",
+    "path": "/krm/v1/projects/{projectId}/cluster/batch-unbind",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_projects_projectid_clusternamespace_batch_bind",
+    "name": "绑定项目与集群命名空间",
+    "method": "POST",
+    "path": "/krm/v1/projects/{projectId}/clusterNamespace/batch-bind",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_projects_projectid_clusternamespace_batch_unbind",
+    "name": "解绑项目与集群命名空间",
+    "method": "POST",
+    "path": "/krm/v1/projects/{projectId}/clusterNamespace/batch-unbind",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_projects_projectid_clusternamespace",
+    "name": "查询项目已绑定的集群命名空间列表",
+    "method": "GET",
+    "path": "/krm/v1/projects/{projectId}/clusterNamespace",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "get_krm_v1_projects_projectid_cluster",
+    "name": "查询项目已绑定的集群列表",
+    "method": "GET",
+    "path": "/krm/v1/projects/{projectId}/cluster",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_projects_projectid_imagenamespace_batch_bind",
+    "name": "绑定项目与镜像命名空间",
+    "method": "POST",
+    "path": "/krm/v1/projects/{projectId}/imageNamespace/batch-bind",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_projects_projectid_imagenamespace_batch_unbind",
+    "name": "解绑项目与镜像命名空间",
+    "method": "POST",
+    "path": "/krm/v1/projects/{projectId}/imageNamespace/batch-unbind",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_projects_projectid_imagenamespace",
+    "name": "查询项目已绑定的镜像命名空间列表",
+    "method": "GET",
+    "path": "/krm/v1/projects/{projectId}/imageNamespace",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_projects_projectid_user_batch_bind",
+    "name": "绑定项目与用户",
+    "method": "POST",
+    "path": "/krm/v1/projects/{projectId}/user/batch-bind",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_projects_projectid_user_batch_unbind",
+    "name": "解绑项目与用户",
+    "method": "POST",
+    "path": "/krm/v1/projects/{projectId}/user/batch-unbind",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_projects_projectid_user",
+    "name": "查询项目已绑定的用户列表",
+    "method": "GET",
+    "path": "/krm/v1/projects/{projectId}/user",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_projects_projectid",
+    "name": "删除项目",
+    "method": "DELETE",
+    "path": "/krm/v1/projects/{projectId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_projects_projectid",
+    "name": "查询项目详情",
+    "method": "GET",
+    "path": "/krm/v1/projects/{projectId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_projects_projectid",
+    "name": "修改项目",
+    "method": "PUT",
+    "path": "/krm/v1/projects/{projectId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_projects",
+    "name": "查询项目列表",
+    "method": "GET",
+    "path": "/krm/v1/projects",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_projects",
+    "name": "创建项目",
+    "method": "POST",
+    "path": "/krm/v1/projects",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_system_config_modulekey_batch_delete",
+    "name": "批量删除系统配置",
+    "method": "POST",
+    "path": "/krm/v1/system/config/{moduleKey}/batch-delete",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_system_config_modulekey",
+    "name": "获取系统设置列表",
+    "method": "GET",
+    "path": "/krm/v1/system/config/{moduleKey}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_system_config_modulekey",
+    "name": "保存系统配置数据",
+    "method": "POST",
+    "path": "/krm/v1/system/config/{moduleKey}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_system_hosts_pacifics",
+    "name": "获取支持仲裁的主机型号",
+    "method": "GET",
+    "path": "/krm/v1/system/hosts/pacifics",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/hosts.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_system_hosts_quorum",
+    "name": "获取主机仲裁信息",
+    "method": "POST",
+    "path": "/krm/v1/system/hosts/quorum",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_system_quorums_quorumid_clientcert",
+    "name": "上传仲裁服务器客户端证书",
+    "method": "PUT",
+    "path": "/krm/v1/system/quorums/{quorumId}/ClientCert",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_system_quorums_quorumid_fingerprint_confirm",
+    "name": "确认仲裁服务器公钥指纹",
+    "method": "POST",
+    "path": "/krm/v1/system/quorums/{quorumId}/fingerprint/confirm",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_system_quorums_quorumid_fingerprint_refresh",
+    "name": "刷新仲裁服务器公钥指纹",
+    "method": "POST",
+    "path": "/krm/v1/system/quorums/{quorumId}/fingerprint/refresh",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_system_quorums_quorumid_servercert",
+    "name": "查询仲裁服务器服务端证书列表",
+    "method": "GET",
+    "path": "/krm/v1/system/quorums/{quorumId}/serverCert",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "delete_krm_v1_system_quorums_quorumid",
+    "name": "移除仲裁服务器",
+    "method": "DELETE",
+    "path": "/krm/v1/system/quorums/{quorumId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_system_quorums_quorumid",
+    "name": "查询仲裁服务器详情",
+    "method": "GET",
+    "path": "/krm/v1/system/quorums/{quorumId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "put_krm_v1_system_quorums_quorumid",
+    "name": "修改仲裁服务器信息",
+    "method": "PUT",
+    "path": "/krm/v1/system/quorums/{quorumId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_system_quorums",
+    "name": "查询仲裁服务器列表",
+    "method": "GET",
+    "path": "/krm/v1/system/quorums",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/clusters.json"
+    }
+  },
+  {
+    "id": "post_krm_v1_system_quorums",
+    "name": "添加仲裁服务器",
+    "method": "POST",
+    "path": "/krm/v1/system/quorums",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_tasks_taskid_retry",
+    "name": "重试任务",
+    "method": "POST",
+    "path": "/krm/v1/tasks/{taskId}/retry",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_tasks_taskid_rollback",
+    "name": "回滚任务",
+    "method": "POST",
+    "path": "/krm/v1/tasks/{taskId}/rollback",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_tasks_taskid",
+    "name": "删除任务",
+    "method": "DELETE",
+    "path": "/krm/v1/tasks/{taskId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_tasks_taskid",
+    "name": "查询单个任务详情",
+    "method": "GET",
+    "path": "/krm/v1/tasks/{taskId}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_tasks",
+    "name": "查询任务列表",
+    "method": "GET",
+    "path": "/krm/v1/tasks",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "delete_krm_v1_clusterid_components_componentname",
+    "name": "卸载组件",
+    "method": "DELETE",
+    "path": "/krm/v1/{clusterId}/components/{componentName}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusterid_components_componentname",
+    "name": "查询组件详情",
+    "method": "GET",
+    "path": "/krm/v1/{clusterId}/components/{componentName}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "put_krm_v1_clusterid_components_componentname",
+    "name": "配置指定组件",
+    "method": "PUT",
+    "path": "/krm/v1/{clusterId}/components/{componentName}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_krm_v1_clusterid_components",
+    "name": "查询所有组件信息",
+    "method": "GET",
+    "path": "/krm/v1/{clusterId}/components",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_krm_v1_clusterid_components",
+    "name": "部署指定组件",
+    "method": "POST",
+    "path": "/krm/v1/{clusterId}/components",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_v2_catalog",
+    "name": "查询镜像仓库列表",
+    "method": "GET",
+    "path": "/v2/_catalog",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "delete_v2_namespace_blobs_uploads_uuid",
+    "name": "删除镜像层上传文件",
+    "method": "DELETE",
+    "path": "/v2/{namespace}/**/blobs/uploads/{uuid}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_v2_namespace_blobs_uploads_uuid",
+    "name": "查询镜像层上传信息",
+    "method": "GET",
+    "path": "/v2/{namespace}/**/blobs/uploads/{uuid}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "patch_v2_namespace_blobs_uploads_uuid",
+    "name": "上传镜像层文件",
+    "method": "PATCH",
+    "path": "/v2/{namespace}/**/blobs/uploads/{uuid}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_v2_namespace_blobs_uploads_uuid",
+    "name": "上传镜像层文件",
+    "method": "PUT",
+    "path": "/v2/{namespace}/**/blobs/uploads/{uuid}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_v2_namespace_blobs_uploads",
+    "name": "上传镜像层",
+    "method": "POST",
+    "path": "/v2/{namespace}/**/blobs/uploads",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_v2_namespace_blobs_digest",
+    "name": "删除镜像层",
+    "method": "DELETE",
+    "path": "/v2/{namespace}/**/blobs/{digest}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_v2_namespace_blobs_digest",
+    "name": "查询镜像层",
+    "method": "GET",
+    "path": "/v2/{namespace}/**/blobs/{digest}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "na_v2_namespace_blobs_digest",
+    "name": "查询镜像层",
+    "method": "GET",
+    "path": "/v2/{namespace}/**/blobs/{digest}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "delete_v2_namespace_manifests_reference",
+    "name": "删除镜像元数据",
+    "method": "DELETE",
+    "path": "/v2/{namespace}/**/manifests/{reference}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_v2_namespace_manifests_reference",
+    "name": "查询镜像元数据",
+    "method": "GET",
+    "path": "/v2/{namespace}/**/manifests/{reference}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "na_v2_namespace_manifests_reference",
+    "name": "查询镜像元数据",
+    "method": "GET",
+    "path": "/v2/{namespace}/**/manifests/{reference}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "put_v2_namespace_manifests_reference",
+    "name": "上传镜像元数据",
+    "method": "PUT",
+    "path": "/v2/{namespace}/**/manifests/{reference}",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_v2_namespace_tags_list",
+    "name": "查询镜像版本列表",
+    "method": "GET",
+    "path": "/v2/{namespace}/**/tags/list",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "get_v2",
+    "name": "检查版本",
+    "method": "GET",
+    "path": "/v2",
+    "source": "FusionCompute 8.10.0 容器接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "na_rest_uam_v1_roles_parm1_parm2",
+    "name": "URL说明",
+    "method": "GET",
+    "path": "/rest/uam/v1/roles/{parm1}/{parm2}",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "na_v3_auth_tokens",
+    "name": "Token认证",
+    "method": "GET",
+    "path": "/v3/auth/tokens",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "na_v3_huawei_auth_credential",
+    "name": "获取临时AK/SK",
+    "method": "GET",
+    "path": "/v3-huawei/auth/credential",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_rest_as_configuration_v1_project_id_scaling_configuration_scaling_configuration_id",
+    "name": "查询弹性伸缩配置详情",
+    "method": "GET",
+    "path": "/rest/as/configuration/v1/{project_id}/scaling-configuration/{scaling_configuration_id}",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_rest_as_configuration_v1_project_id_scaling_configuration",
+    "name": "查询弹性伸缩配置列表",
+    "method": "GET",
+    "path": "/rest/as/configuration/v1/{project_id}/scaling-configuration",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_rest_as_configuration_v1_project_id_scaling_configuration",
+    "name": "创建弹性伸缩配置",
+    "method": "POST",
+    "path": "/rest/as/configuration/v1/{project_id}/scaling-configuration",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_as_configuration_v1_project_id_scaling_configurations_delete",
+    "name": "批量删除弹性伸缩配置",
+    "method": "POST",
+    "path": "/rest/as/configuration/v1/{project_id}/scaling-configurations/delete",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_as_group_v1_project_id_scaling_group_scaling_group_id_action",
+    "name": "启用或停止弹性伸缩组",
+    "method": "POST",
+    "path": "/rest/as/group/v1/{project_id}/scaling-group/{scaling_group_id}/action",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_rest_as_group_v1_project_id_scaling_group_scaling_group_id_configuration",
+    "name": "修改弹性伸缩组的伸缩配置",
+    "method": "PUT",
+    "path": "/rest/as/group/v1/{project_id}/scaling-group/{scaling_group_id}/configuration",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "delete_rest_as_group_v1_project_id_scaling_group_scaling_group_id",
+    "name": "删除弹性伸缩组",
+    "method": "DELETE",
+    "path": "/rest/as/group/v1/{project_id}/scaling-group/{scaling_group_id}",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_rest_as_group_v1_project_id_scaling_group_scaling_group_id",
+    "name": "查询弹性伸缩组详情",
+    "method": "GET",
+    "path": "/rest/as/group/v1/{project_id}/scaling-group/{scaling_group_id}",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "put_rest_as_group_v1_project_id_scaling_group_scaling_group_id",
+    "name": "修改弹性伸缩组",
+    "method": "PUT",
+    "path": "/rest/as/group/v1/{project_id}/scaling-group/{scaling_group_id}",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_rest_as_group_v1_project_id_scaling_group",
+    "name": "查询弹性伸缩组列表",
+    "method": "GET",
+    "path": "/rest/as/group/v1/{project_id}/scaling-group",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_rest_as_group_v1_project_id_scaling_group",
+    "name": "创建弹性伸缩组",
+    "method": "POST",
+    "path": "/rest/as/group/v1/{project_id}/scaling-group",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_as_instance_v1_project_id_scaling_group_instance_scaling_group_id_instance_action_type",
+    "name": "添加实例/移除指定实例",
+    "method": "POST",
+    "path": "/rest/as/instance/v1/{project_id}/scaling-group-instance/{scaling_group_id}/instance/{action_type}",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_rest_as_instance_v1_project_id_scaling_group_instance_scaling_group_id_instances",
+    "name": "查询弹性伸缩组实例列表",
+    "method": "GET",
+    "path": "/rest/as/instance/v1/{project_id}/scaling-group-instance/{scaling_group_id}/instances",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "get_rest_as_instance_v1_project_id_scaling_group_instance_scaling_group_id",
+    "name": "查询弹性云服务器列表",
+    "method": "GET",
+    "path": "/rest/as/instance/v1/{project_id}/scaling-group-instance/{scaling_group_id}",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "post_rest_as_monitor_v1_project_id_scaling_group_scaling_group_id_charts_data",
+    "name": "查询伸缩组实例监控数据",
+    "method": "POST",
+    "path": "/rest/as/monitor/v1/{project_id}/scaling-group/{scaling_group_id}/charts-data",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_rest_as_policy_monitor_v1_project_id_group_scaling_group_id_monitor_list",
+    "name": "查看伸缩组下监控配置列表",
+    "method": "GET",
+    "path": "/rest/as/policy-monitor/v1/{project_id}/group/{scaling_group_id}/monitor/list",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/metrics-sample.json"
+    }
+  },
+  {
+    "id": "post_rest_as_policy_monitor_v1_project_id_monitor_delete",
+    "name": "批量删除监控配置",
+    "method": "POST",
+    "path": "/rest/as/policy-monitor/v1/{project_id}/monitor/delete",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_rest_as_policy_monitor_v1_project_id_monitor_monitor_id",
+    "name": "查看弹性伸缩策略监控详情",
+    "method": "GET",
+    "path": "/rest/as/policy-monitor/v1/{project_id}/monitor/{monitor_id}",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/metrics-sample.json"
+    }
+  },
+  {
+    "id": "put_rest_as_policy_monitor_v1_project_id_monitor_monitor_id",
+    "name": "修改伸缩策略监控数据",
+    "method": "PUT",
+    "path": "/rest/as/policy-monitor/v1/{project_id}/monitor/{monitor_id}",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_as_policy_monitor_v1_project_id_monitor",
+    "name": "创建伸缩策略监控数据",
+    "method": "POST",
+    "path": "/rest/as/policy-monitor/v1/{project_id}/monitor",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_rest_as_policy_v1_project_id_scaling_policy_scaling_group_id_list",
+    "name": "查看伸缩组下伸缩策略列表",
+    "method": "GET",
+    "path": "/rest/as/policy/v1/{project_id}/scaling-policy/{scaling_group_id}/list",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_rest_as_policy_v1_project_id_scaling_policy_scaling_policy_id_action",
+    "name": "执行启用或停止弹性伸缩策略",
+    "method": "POST",
+    "path": "/rest/as/policy/v1/{project_id}/scaling-policy/{scaling_policy_id}/action",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_rest_as_policy_v1_project_id_scaling_policy_scaling_policy_id",
+    "name": "查看弹性伸缩策略详情",
+    "method": "GET",
+    "path": "/rest/as/policy/v1/{project_id}/scaling-policy/{scaling_policy_id}",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_rest_as_policy_v1_project_id_scaling_policy_scaling_policy_id",
+    "name": "删除弹性伸缩策略",
+    "method": "POST",
+    "path": "/rest/as/policy/v1/{project_id}/scaling-policy/{scaling_policy_id}",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "put_rest_as_policy_v1_project_id_scaling_policy_scaling_policy_id",
+    "name": "修改弹性伸缩策略",
+    "method": "PUT",
+    "path": "/rest/as/policy/v1/{project_id}/scaling-policy/{scaling_policy_id}",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_as_policy_v1_project_id_scaling_policy",
+    "name": "创建弹性伸缩策略",
+    "method": "POST",
+    "path": "/rest/as/policy/v1/{project_id}/scaling-policy",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_rest_as_record_v1_project_id_scaling_records",
+    "name": "查询伸缩活动",
+    "method": "GET",
+    "path": "/rest/as/record/v1/{project_id}/scaling-records",
+    "source": "FusionCompute 8.10.0 弹性伸缩服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "na_rest_uam_v1_roles_parm1_parm2",
+    "name": "URL说明",
+    "method": "GET",
+    "path": "/rest/uam/v1/roles/{parm1}/{parm2}",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "na_v3_auth_tokens",
+    "name": "Token认证",
+    "method": "GET",
+    "path": "/v3/auth/tokens",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "na_v3_huawei_auth_credential",
+    "name": "获取临时AK/SK",
+    "method": "GET",
+    "path": "/v3-huawei/auth/credential",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "unknown",
+    "confidence": "medium",
+    "mock_response": {
+      "status": 200,
+      "body": {
+        "result": "ok",
+        "mock": true
+      }
+    }
+  },
+  {
+    "id": "post_rest_ims_images_v1_project_id_query",
+    "name": "租户查询镜像列表",
+    "method": "POST",
+    "path": "/rest/ims/images/v1/{project_id}/query",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_ims_images_v1_project_id_share_delete",
+    "name": "删除共享镜像，支持批量",
+    "method": "POST",
+    "path": "/rest/ims/images/v1/{project_id}/share/delete",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_ims_images_v1_project_id_share_accept",
+    "name": "共享镜像接受",
+    "method": "POST",
+    "path": "/rest/ims/images/v1/{project_id}/share/accept",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_ims_images_v1_project_id_share_reject",
+    "name": "共享镜像拒绝",
+    "method": "POST",
+    "path": "/rest/ims/images/v1/{project_id}/share/reject",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_ims_images_v1_project_id_share_cancel",
+    "name": "私有镜像批量取消共享",
+    "method": "POST",
+    "path": "/rest/ims/images/v1/{project_id}/share/cancel",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_ims_images_v1_project_id_share_create",
+    "name": "私有镜像共享",
+    "method": "POST",
+    "path": "/rest/ims/images/v1/{project_id}/share/create",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_ims_images_v1_project_id_local_export",
+    "name": "租户本地导出私有镜像",
+    "method": "POST",
+    "path": "/rest/ims/images/v1/{project_id}/local-export",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_ims_images_v1_project_id_export_image_id_remote_export",
+    "name": "租户远程导出私有镜像",
+    "method": "POST",
+    "path": "/rest/ims/images/v1/{project_id}/export/{image_id}/remote-export",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_rest_ims_images_v1_project_id_image_id_file_list",
+    "name": "查询镜像下的文件列表",
+    "method": "GET",
+    "path": "/rest/ims/images/v1/{project_id}/{image_id}/file-list",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "get_rest_ims_images_v1_project_id_query_image_id",
+    "name": "租户查询镜像详情",
+    "method": "GET",
+    "path": "/rest/ims/images/v1/{project_id}/query/{image_id}",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "put_rest_ims_images_v1_project_id_query_image_id",
+    "name": "租户更新镜像信息",
+    "method": "PUT",
+    "path": "/rest/ims/images/v1/{project_id}/query/{image_id}",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "get_rest_ims_images_v1_query_image_id_details",
+    "name": "租户查询镜像详情",
+    "method": "GET",
+    "path": "/rest/ims/images/v1/query/{image_id}/details",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/images.json"
+    }
+  },
+  {
+    "id": "get_rest_ims_images_v1_project_id_query_image_id_associated_ecs_list",
+    "name": "租户查询镜像关联的弹性云服务器列表",
+    "method": "GET",
+    "path": "/rest/ims/images/v1/{project_id}/query/{image_id}/associated-ecs-list",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "read",
+    "confidence": "high",
+    "mock_response": {
+      "status": 200,
+      "body_ref": "data/vms.json"
+    }
+  },
+  {
+    "id": "post_rest_ims_images_v1_project_id",
+    "name": "远程导入镜像",
+    "method": "POST",
+    "path": "/rest/ims/images/v1/{project_id}",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_ims_images_v1_project_id_delete",
+    "name": "删除镜像，支持批量",
+    "method": "POST",
+    "path": "/rest/ims/images/v1/{project_id}/delete",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "confirm_required",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_ims_image_file_v1_project_id_multipart_upload",
+    "name": "开启分片上传",
+    "method": "POST",
+    "path": "/rest/ims/image-file/v1/{project_id}/multipart-upload",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_ims_image_file_v1_project_id_multipart_upload_upload_id_heartbeat",
+    "name": "镜像上传心跳检测",
+    "method": "POST",
+    "path": "/rest/ims/image-file/v1/{project_id}/multipart-upload/{upload_id}/heartbeat",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_ims_image_file_v1_project_id_multipart_upload_upload_id",
+    "name": "上传分片",
+    "method": "POST",
+    "path": "/rest/ims/image-file/v1/{project_id}/multipart-upload/{upload_id}",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  },
+  {
+    "id": "post_rest_ims_image_file_v1_project_id_multipart_upload_upload_id_finish",
+    "name": "完成分片上传",
+    "method": "POST",
+    "path": "/rest/ims/image-file/v1/{project_id}/multipart-upload/{upload_id}/finish",
+    "source": "FusionCompute 8.10.0 镜像服务接口文档.docx",
+    "safety": "write",
+    "confidence": "high",
+    "mock_response": {
+      "status": 202,
+      "body": {
+        "task_id": "task-20260704-0001",
+        "status": "running",
+        "message": "mock task accepted"
+      }
+    }
+  }
+]
