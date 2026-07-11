@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from typing import Any, Literal, TypedDict
 from uuid import uuid4
 
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command, interrupt
 
-from backend.agent.llm import call_deepseek, classify_intent_with_llm, summarize_messages
-from backend.agent.checkpoint import CHECKPOINTER
+from backend.agent.llm import call_deepseek, call_deepseek_tool_plan, classify_intent_with_llm, summarize_messages
+from backend.agent.checkpoint import close_checkpointer, get_checkpointer
 from backend.guardrails.approvals import approval_store
-from backend.guardrails.policy import detect_write_intent, record_tool_execution, validate_tool_calls
+from backend.guardrails.policy import detect_write_intent, record_tool_execution, risk_for_tool, validate_tool_calls
 from backend.mcp.schemas import ToolRequest
-from backend.mcp.tools import call_tool
+from backend.mcp.tools import TOOL_REGISTRY, call_tool
 from backend.memory.context_manager import deterministic_summary, manage_context_window
 from backend.memory.database import memory_db
 from backend.memory.retriever import retrieve, retrieve_history, retrieve_skill_detail
@@ -38,6 +39,7 @@ class CopilotState(TypedDict, total=False):
     retrieved_docs: list[dict]
     retrieved_history: list[dict]
     plan: list[str]
+    plan_source: str
     tool_calls_proposed: list[dict[str, Any]]
     tool_results: list[dict[str, Any]]
     hitl_required: bool
@@ -80,14 +82,14 @@ def classify_intent(message: str) -> str:
     return "general"
 
 
-def extract_cluster_id(message: str) -> str:
+def extract_cluster_id(message: str) -> str | None:
     match = re.search(r"cluster-\d+", message, re.I)
-    return match.group(0).lower() if match else "cluster-002"
+    return match.group(0).lower() if match else None
 
 
-def extract_vm_id(message: str) -> str:
+def extract_vm_id(message: str) -> str | None:
     match = re.search(r"(vm-\d+|dcs-[a-z0-9-]+)", message, re.I)
-    return match.group(0) if match else "dcs-app-01"
+    return match.group(0) if match else None
 
 
 def extract_alarm_id(message: str, history: list[dict[str, str]] | None = None) -> str | None:
@@ -126,24 +128,22 @@ def plan_tools(intent: str, message: str, history: list[dict[str, str]]) -> list
         alarm_id = extract_alarm_id(message, history)
         asks_list = _contains(message, ["哪些", "列表", "多少", "当前", "现在", "所有"])
         if alarm_id:
-            calls += [
-                {"tool_name": "get_alarm_detail", "params": {"alarm_id": alarm_id}},
-                {"tool_name": "get_cluster_capacity", "params": {"cluster_id": "cluster-002"}},
-            ]
+            calls.append({"tool_name": "get_alarm_detail", "params": {"alarm_id": alarm_id}})
         elif not asks_list:
-            calls += [
-                {"tool_name": "get_alarm_detail", "params": {"alarm_id": "alarm-9001"}},
-                {"tool_name": "get_cluster_capacity", "params": {"cluster_id": "cluster-002"}},
-            ]
+            return []
         return calls
     if intent == "capacity_forecast":
         cluster_id = extract_cluster_id(message)
+        if not cluster_id:
+            return []
         return [
             {"tool_name": "get_cluster_capacity", "params": {"cluster_id": cluster_id}},
             {"tool_name": "run_capacity_forecast", "params": {"cluster_id": cluster_id, "forecast_days": 30}},
         ]
     if intent == "vm_diagnosis":
         vm_id = extract_vm_id(message)
+        if not vm_id:
+            return []
         return [
             {"tool_name": "get_vm_detail", "params": {"vm_id": vm_id}},
             {"tool_name": "get_vm_metrics", "params": {"vm_id": vm_id, "time_range": "1h"}},
@@ -157,20 +157,28 @@ def plan_tools(intent: str, message: str, history: list[dict[str, str]]) -> list
         ]
     if intent == "change_execute":
         if "重启" in message:
+            vm_id = extract_vm_id(message)
+            if not vm_id:
+                return []
             return [{
                 "tool_name": "restart_vm",
-                "params": {"vm_id": extract_vm_id(message), "reason": message, "change_ticket_id": "DEMO-AUTO"},
+                "params": {"vm_id": vm_id, "reason": message, "change_ticket_id": "DEMO-AUTO"},
             }]
         if "扩容" in message or "扩缩容" in message:
             cluster_id = extract_cluster_id(message)
+            if not cluster_id:
+                return []
             count = re.search(r"(?:到|至|为)\s*(\d+)\s*台", message)
             current = next((cluster["host_count"] for cluster in call_tool(ToolRequest(tool_name="list_clusters", params={})).data if cluster["id"] == cluster_id), 1)
             target_hosts = int(count.group(1)) if count else current + 1
             return [{"tool_name": "scale_cluster", "params": {"cluster_id": cluster_id, "target_hosts": target_hosts, "reason": message}}]
         if "HA" in message.upper() or "策略" in message:
+            cluster_id = extract_cluster_id(message)
+            if not cluster_id:
+                return []
             return [{
                 "tool_name": "modify_ha_policy",
-                "params": {"cluster_id": extract_cluster_id(message), "policy": {"enabled": True}, "reason": message},
+                "params": {"cluster_id": cluster_id, "policy": {"enabled": True}, "reason": message},
             }]
         return []
     return []
@@ -198,11 +206,10 @@ def context_loader(state: CopilotState) -> CopilotState:
         state.get("conversation_summary", ""),
         summarizer,
     )
-    snapshot = call_tool(ToolRequest(tool_name="get_resource_overview", params={}, caller_roles=state["user_roles"]))
     return {
         "recent_messages": context["recent_messages"],
         "conversation_summary": context["conversation_summary"],
-        "resource_snapshot": snapshot.data if snapshot.success else None,
+        "resource_snapshot": None,
         "alert_payload": None,
     }
 
@@ -214,21 +221,58 @@ def memory_retriever(state: CopilotState) -> CopilotState:
 
 
 def planner(state: CopilotState) -> CopilotState:
-    calls = plan_tools(state["intent"], state["message"], state.get("recent_messages", []))
     docs = list(state.get("retrieved_docs", []))
     if docs:
         detail = retrieve_skill_detail(docs[0]["id"], state["user_roles"], state["tenant_id"])
         if detail:
             docs.append(detail)
+    llm_plan = None
+    if state["intent"] not in {"smalltalk", "general"}:
+        tool_catalog = [
+            {
+                "type": "function",
+                "function": {
+                    "name": spec.name,
+                    "description": spec.description,
+                    "parameters": spec.input_model.model_json_schema(),
+                },
+            }
+            for spec in TOOL_REGISTRY.values()
+            if any(role in spec.auth_roles for role in state["user_roles"])
+        ]
+        try:
+            llm_plan = call_deepseek_tool_plan(
+                state["message"],
+                state["intent"],
+                state.get("recent_messages", []),
+                docs,
+                tool_catalog,
+            )
+        except Exception:
+            llm_plan = None
+    calls = (
+        llm_plan["tool_calls"]
+        if llm_plan is not None
+        else plan_tools(state["intent"], state["message"], state.get("recent_messages", []))
+    )
+    plan = make_plan(state["intent"], state["message"])
+    if llm_plan and llm_plan.get("reason"):
+        plan = [llm_plan["reason"], *plan]
     return {
-        "plan": make_plan(state["intent"], state["message"]),
+        "plan": plan,
+        "plan_source": "deepseek_tool_calling" if llm_plan is not None else "deterministic_fallback",
         "tool_calls_proposed": calls,
         "retrieved_docs": docs,
     }
 
 
 def guardrail(state: CopilotState) -> CopilotState:
-    result = validate_tool_calls(state.get("tool_calls_proposed", []), state["user_roles"], state["message"])
+    result = validate_tool_calls(
+        state.get("tool_calls_proposed", []),
+        state["user_roles"],
+        state["message"],
+        state["task_id"],
+    )
     if not result["allowed"]:
         return {
             "tool_calls_proposed": [],
@@ -244,6 +288,8 @@ def guardrail(state: CopilotState) -> CopilotState:
 
 
 def hitl_interrupt(state: CopilotState) -> CopilotState:
+    # LangGraph reruns this node from the top after resume. Keep every operation
+    # before interrupt() idempotent; create_or_get is keyed by task_id for that reason.
     item = approval_store.create_or_get(
         state["task_id"],
         state["conversation_id"],
@@ -275,7 +321,17 @@ def hitl_interrupt(state: CopilotState) -> CopilotState:
 def tool_executor(state: CopilotState) -> CopilotState:
     results = []
     execution_log = []
-    for call in state.get("tool_calls_proposed", []):
+    calls = state.get("tool_calls_proposed", [])
+    write_calls = [call for call in calls if risk_for_tool(call["tool_name"]) in {"medium", "high"}]
+    if write_calls:
+        recheck = validate_tool_calls(write_calls, state["user_roles"], state["message"], state["task_id"])
+        if not recheck["allowed"]:
+            return {
+                "tool_results": [],
+                "execution_log": [],
+                "error": "执行前复检失败：" + "；".join(recheck["violations"]),
+            }
+    for call in calls:
         response = call_tool(ToolRequest(
             tool_name=call["tool_name"],
             params=call["params"],
@@ -287,7 +343,7 @@ def tool_executor(state: CopilotState) -> CopilotState:
         result = response.model_dump()
         results.append(result)
         if response.success:
-            record_tool_execution(call["tool_name"], call["params"])
+            record_tool_execution(state["task_id"], call["tool_name"], call["params"])
         execution_log.append({"tool_name": call["tool_name"], "success": response.success, "audit_id": response.audit_id})
     return {"tool_results": results, "execution_log": execution_log}
 
@@ -310,8 +366,11 @@ def deterministic_response(state: CopilotState) -> str:
         return "你好，我在。你可以自然地问我资源、告警、容量、VM 性能，也可以继续追问上一轮结果。"
     data = _tool_data(state)
     if intent == "alert_explain":
+        asks_list = _contains(message, ["哪些", "列表", "多少", "当前", "现在", "所有"])
+        if not asks_list and not extract_alarm_id(message, state.get("recent_messages", [])):
+            return "请告诉我要解释的告警编号，例如 alarm-9001；也可以先问“现在有哪些告警”。"
         alarms = data.get("list_alarms") or []
-        asks_list = _contains(message, ["哪些", "列表", "多少", "当前", "现在", "所有"]) and not extract_alarm_id(message, state.get("recent_messages", []))
+        asks_list = asks_list and not extract_alarm_id(message, state.get("recent_messages", []))
         if asks_list:
             alarm_lines = "\n".join(f"- {a['id']}：{a['name']}，级别 {a['severity']}，对象 {a['object_type']} / {a['object_id']}，状态 {a['status']}" for a in alarms)
             return f"当前共有 {len(alarms)} 条活动告警。\n\n{alarm_lines}\n\n你可以继续问：第一条告警的原因？第二条呢？"
@@ -324,9 +383,13 @@ def deterministic_response(state: CopilotState) -> str:
         ds = related.get("datastore") or {}
         return f"结论：{alarm.get('id')} 的主要风险是 {alarm.get('name')}。\n\n证据：关联数据存储 {ds.get('name')} 剩余 {ds.get('free_gb')}GB / 总量 {ds.get('capacity_gb')}GB。\n\n建议动作：先清理过期快照和低价值镜像，确认增长最快的 VM；如无法释放空间，准备扩容或迁移计划。\n\n风险提示：不要直接删除未知磁盘或快照，先确认业务归属和备份状态。"
     if intent == "capacity_forecast":
+        if not extract_cluster_id(message):
+            return "请指定要预测的集群，例如 cluster-001 或 cluster-002。"
         forecast = data.get("run_capacity_forecast") or {}
         return f"结论：{forecast.get('cluster_id')} 容量风险为 {forecast.get('risk_level')}。\n\n证据：日增长约 {forecast.get('daily_growth_gb')}GB，预计 {forecast.get('days_to_exhaustion')} 天后耗尽。\n\n建议动作：{forecast.get('recommendation')}"
     if intent == "vm_diagnosis":
+        if not extract_vm_id(message):
+            return "请指定要诊断的虚拟机 ID 或名称，例如 vm-1001 或 dcs-app-01。"
         failed = [item for item in state.get("tool_results", []) if not item.get("success")]
         detail = data.get("get_vm_detail")
         if failed or not detail:
@@ -357,6 +420,14 @@ def deterministic_response(state: CopilotState) -> str:
             return f"当前共有 {len(datastores)} 个数据存储。\n\n{lines}"
         return f"资源盘点：站点 {len(resource.get('sites', []))} 个，集群 {overview.get('cluster_count')} 个，主机 {overview.get('host_count')} 台，VM {overview.get('vm_count')} 台，数据存储 {overview.get('datastore_count')} 个，活跃告警 {overview.get('active_alarm_count')} 条。"
     if intent == "change_execute":
+        if not state.get("tool_calls_proposed"):
+            if "重启" in message:
+                return "请指定要重启的虚拟机 ID 或名称，确认对象后我再生成审批。"
+            if _contains(message, ["扩容", "扩缩容", "HA", "策略"]):
+                return "请指定要变更的集群 ID，例如 cluster-002，确认对象后我再生成审批。"
+            if _contains(message, ["删除", "销毁", "清空"]):
+                return "请求被护栏拦截：当前系统不支持删除或销毁资源。"
+            return "请补充明确的变更对象和动作，我不会猜测资源后发起执行。"
         completed = [item for item in state.get("tool_results", []) if item.get("success")]
         if completed:
             result = completed[-1].get("data") or {}
@@ -365,7 +436,19 @@ def deterministic_response(state: CopilotState) -> str:
     return "我在。你可以问资源、告警、容量预测、VM 性能诊断，也可以继续追问上一轮结果。"
 
 
+def _response_facts_are_grounded(response: str, state: CopilotState) -> bool:
+    pattern = r"(?:alarm|cluster|vm|ds|host)-\d+|dcs-[a-z0-9-]+"
+    mentioned = {item.lower() for item in re.findall(pattern, response, re.I)}
+    if not mentioned:
+        return True
+    evidence = json.dumps(state.get("tool_results", []), ensure_ascii=False)
+    grounded = {item.lower() for item in re.findall(pattern, evidence, re.I)}
+    return mentioned <= grounded
+
+
 def response_generator(state: CopilotState) -> CopilotState:
+    if state.get("error") or state["intent"] in {"change_execute", "config_modify"}:
+        return {"final_response": deterministic_response(state)}
     prompt = json.dumps({
         "message": state["message"],
         "intent": state["intent"],
@@ -373,6 +456,7 @@ def response_generator(state: CopilotState) -> CopilotState:
         "recent_messages": state.get("recent_messages", []),
         "retrieved_docs": state.get("retrieved_docs", []),
         "plan": state.get("plan", []),
+        "plan_source": state.get("plan_source"),
         "tool_results": state.get("tool_results", []),
         "error": state.get("error"),
     }, ensure_ascii=False, indent=2)
@@ -381,7 +465,9 @@ def response_generator(state: CopilotState) -> CopilotState:
         llm_response = call_deepseek(SYSTEM_PROMPT, prompt)
     except Exception as exc:
         state.setdefault("tool_results", []).append({"tool_name": "deepseek", "success": False, "error_msg": str(exc)})
-    return {"final_response": llm_response or deterministic_response(state)}
+    if llm_response and _response_facts_are_grounded(llm_response, state):
+        return {"final_response": llm_response}
+    return {"final_response": deterministic_response(state)}
 
 
 def memory_writer(state: CopilotState) -> CopilotState:
@@ -441,10 +527,26 @@ def build_graph():
     builder.add_edge("tool_executor", "response_generator")
     builder.add_edge("response_generator", "memory_writer")
     builder.add_edge("memory_writer", END)
-    return builder.compile(checkpointer=CHECKPOINTER)
+    return builder.compile(checkpointer=get_checkpointer())
 
 
-GRAPH = build_graph()
+_graph = None
+_graph_lock = threading.Lock()
+
+
+def get_graph():
+    global _graph
+    if _graph is None:
+        with _graph_lock:
+            if _graph is None:
+                _graph = build_graph()
+    return _graph
+
+
+def close_graph_runtime() -> None:
+    global _graph
+    _graph = None
+    close_checkpointer()
 
 
 def _format_result(state: dict[str, Any], conversation_id: str) -> dict[str, Any]:
@@ -461,6 +563,7 @@ def _format_result(state: dict[str, Any], conversation_id: str) -> dict[str, Any
         "tool_results": state.get("tool_results", []),
         "blocked_reason": state.get("error"),
         "plan": state.get("plan", []),
+        "plan_source": state.get("plan_source", "unknown"),
         "retrieved_docs": state.get("retrieved_docs", []),
         "retrieved_history": state.get("retrieved_history", []),
         "summary": state.get("conversation_summary", ""),
@@ -483,12 +586,12 @@ def run_copilot(
     conversation_id = conversation_id or f"conversation-{uuid4()}"
     messages = history or []
     if not messages:
-        stored_messages, stored_summary = memory_db.load_conversation(conversation_id)
+        stored_messages, stored_summary = memory_db.load_conversation(conversation_id, user_id, tenant_id)
         messages = stored_messages
         summary = summary or stored_summary
     task_id = str(uuid4())
     config = {"configurable": {"thread_id": conversation_id}}
-    state = GRAPH.invoke({
+    state = get_graph().invoke({
         "messages": messages,
         "message": message,
         "task_id": task_id,
@@ -508,7 +611,7 @@ def run_copilot(
 
 def resume_copilot(conversation_id: str, approved: bool, approver: str, reason: str = "") -> dict[str, Any]:
     config = {"configurable": {"thread_id": conversation_id}}
-    state = GRAPH.invoke(
+    state = get_graph().invoke(
         Command(resume={"approved": approved, "approver": approver, "reason": reason}),
         config=config,
     )

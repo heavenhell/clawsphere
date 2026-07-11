@@ -1,14 +1,4 @@
-fastapi==0.116.1
-uvicorn[standard]==0.35.0
-langgraph==0.5.2
-langchain-core==0.3.68
-mcp>=1.27,<2
-PyJWT>=2.10,<3
-pytest>=8.4,<9
-rank-bm25>=0.2.2,<1
-psycopg[binary]>=3.2,<4
-pgvector>=0.4,<1
-langgraph-checkpoint-sqlite==2.0.11
-langgraph-checkpoint-postgres==2.0.25
-prometheus-client>=0.22,<1
-langfuse>=4,<5
+-r requirements-base.txt
+-r requirements-postgres.txt
+-r requirements-observability.txt
+-r requirements-dev.txt

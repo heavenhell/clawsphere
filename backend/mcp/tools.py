@@ -9,6 +9,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from backend.guardrails.permission import has_allowed_role
+from backend.guardrails.approvals import approval_store
 from backend.mcp.schemas import (
     AlarmDetailParams,
     AlarmListParams,
@@ -43,9 +44,6 @@ class ToolSpec:
 
 
 TOOL_REGISTRY: dict[str, ToolSpec] = {}
-AUDIT_LOG: list[dict[str, Any]] = []
-APPROVAL_QUEUE: list[dict[str, Any]] = []
-MOCK_CHANGE_LOG: list[dict[str, Any]] = []
 
 
 def mcp_tool(
@@ -152,18 +150,7 @@ def get_vm_metrics(vm_id: str, metric_names: list[str] | None = None, time_range
     if not detail:
         raise ValueError(f"虚拟机不存在：{vm_id}")
     vm = detail["vm"]
-    cpu_usage = 86 if vm.get("name") == "dcs-app-01" else 42
-    cpu_ready = 6.8 if vm.get("name") == "dcs-app-01" else 1.1
-    balloon = 640 if vm.get("name") == "dcs-cache-01" else 0
-    disk_latency = 24 if vm.get("host_id") == "host-005" else 9
-    base = [
-        {"metric": "cpu.usage", "value": cpu_usage, "unit": "%", "status": "warning" if cpu_usage > 80 else "normal"},
-        {"metric": "cpu.ready", "value": cpu_ready, "unit": "%", "status": "warning" if cpu_ready > 5 else "normal"},
-        {"metric": "mem.usage", "value": 72, "unit": "%", "status": "normal"},
-        {"metric": "mem.balloon", "value": balloon, "unit": "MB", "status": "warning" if balloon else "normal"},
-        {"metric": "disk.latency", "value": disk_latency, "unit": "ms", "status": "warning" if disk_latency > 20 else "normal"},
-        {"metric": "net.drop", "value": 0.2, "unit": "%", "status": "normal"},
-    ]
+    base = repo.vm_metrics(vm["id"])
     if metric_names:
         base = [m for m in base if m["metric"] in metric_names]
     return {"vm": vm, "time_range": time_range, "series": base}
@@ -175,7 +162,7 @@ def run_capacity_forecast(cluster_id: str, forecast_days: int = 30):
     if not capacity:
         return None
     free = capacity["datastore_free_gb"]
-    daily_growth_gb = 95 if cluster_id == "cluster-002" else 42
+    daily_growth_gb = repo.cluster_daily_growth_gb(cluster_id)
     days_to_exhaustion = max(0, int(free / daily_growth_gb)) if daily_growth_gb else 999
     return {
         "cluster_id": cluster_id,
@@ -196,20 +183,11 @@ def get_storage_pool_usage(pool_id: str | None = None):
     "create_approval_request",
     "创建高风险操作审批项",
     ApprovalRequestParams,
-    risk="medium",
+    risk="none",
     auth_roles=["ops", "admin"],
 )
 def create_approval_request(title: str, description: str, risk: str = "high"):
-    item = {
-        "id": f"approval-{len(APPROVAL_QUEUE) + 1:04d}",
-        "title": title,
-        "description": description,
-        "risk": risk,
-        "status": "pending",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    APPROVAL_QUEUE.append(item)
-    return item
+    return {"title": title, "description": description, "risk": risk}
 
 
 @mcp_tool("restart_vm", "重启指定虚拟机", RestartVmParams, risk="high", auth_roles=["ops", "admin"])
@@ -218,7 +196,7 @@ def restart_vm(vm_id: str, reason: str, change_ticket_id: str):
     if not vm:
         raise ValueError("虚拟机不存在")
     result = {
-        "task_id": f"mock-restart-{len(MOCK_CHANGE_LOG) + 1:04d}",
+        "task_id": f"mock-restart-{uuid4().hex[:8]}",
         "action": "restart_vm",
         "resource_id": vm["id"],
         "resource_name": vm["name"],
@@ -226,7 +204,6 @@ def restart_vm(vm_id: str, reason: str, change_ticket_id: str):
         "reason": reason,
         "status": "completed",
     }
-    MOCK_CHANGE_LOG.append(result)
     return result
 
 
@@ -236,7 +213,7 @@ def scale_cluster(cluster_id: str, target_hosts: int, reason: str):
     if not cluster:
         raise ValueError("集群不存在")
     result = {
-        "task_id": f"mock-scale-{len(MOCK_CHANGE_LOG) + 1:04d}",
+        "task_id": f"mock-scale-{uuid4().hex[:8]}",
         "action": "scale_cluster",
         "resource_id": cluster_id,
         "previous_hosts": cluster["host_count"],
@@ -244,7 +221,6 @@ def scale_cluster(cluster_id: str, target_hosts: int, reason: str):
         "reason": reason,
         "status": "completed",
     }
-    MOCK_CHANGE_LOG.append(result)
     return result
 
 
@@ -253,14 +229,13 @@ def modify_ha_policy(cluster_id: str, policy: dict[str, Any], reason: str):
     if not any(item["id"] == cluster_id for item in repo.clusters()):
         raise ValueError("集群不存在")
     result = {
-        "task_id": f"mock-ha-{len(MOCK_CHANGE_LOG) + 1:04d}",
+        "task_id": f"mock-ha-{uuid4().hex[:8]}",
         "action": "modify_ha_policy",
         "resource_id": cluster_id,
         "policy": policy,
         "reason": reason,
         "status": "completed",
     }
-    MOCK_CHANGE_LOG.append(result)
     return result
 
 
@@ -286,10 +261,50 @@ def call_tool(request: ToolRequest) -> ToolResponse:
             execution_time_ms=int((perf_counter() - started) * 1000),
             audit_id=audit_id,
         )
+    elif spec.risk in {"medium", "high"}:
+        approval = approval_store.get_by_task(request.task_id)
+        if not approval or approval["status"] != "approved" or approval["tenant_id"] != request.tenant_id:
+            response = ToolResponse(
+                tool_name=request.tool_name,
+                success=False,
+                error_code="APPROVAL_REQUIRED",
+                error_msg="高风险工具必须关联已批准的审批任务",
+                execution_time_ms=int((perf_counter() - started) * 1000),
+                audit_id=audit_id,
+            )
+        else:
+            try:
+                params = spec.input_model.model_validate(request.params).model_dump(exclude_none=True)
+                data = spec.fn(**params)
+                response = ToolResponse(
+                    tool_name=request.tool_name, success=True, data=data,
+                    execution_time_ms=int((perf_counter() - started) * 1000), audit_id=audit_id,
+                )
+            except (TypeError, ValidationError) as exc:
+                response = ToolResponse(
+                    tool_name=request.tool_name, success=False, error_code="SCHEMA_VALIDATION_FAILED",
+                    error_msg=str(exc), execution_time_ms=int((perf_counter() - started) * 1000), audit_id=audit_id,
+                )
+            except ValueError as exc:
+                response = ToolResponse(
+                    tool_name=request.tool_name, success=False, error_code="BUSINESS_VALIDATION_FAILED",
+                    error_msg=str(exc), execution_time_ms=int((perf_counter() - started) * 1000), audit_id=audit_id,
+                )
     else:
         try:
             params = spec.input_model.model_validate(request.params).model_dump(exclude_none=True)
-            data = spec.fn(**params)
+            if request.tool_name == "create_approval_request":
+                data = approval_store.create_or_get(
+                    request.task_id,
+                    request.task_id,
+                    request.caller_user_id,
+                    request.tenant_id,
+                    params["description"],
+                    [],
+                    params["risk"],
+                )
+            else:
+                data = spec.fn(**params)
             response = ToolResponse(
                 tool_name=request.tool_name,
                 success=True,
@@ -329,8 +344,11 @@ def call_tool(request: ToolRequest) -> ToolResponse:
             "duration_ms": response.execution_time_ms,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-    AUDIT_LOG.append(audit_record)
     memory_db.append_tool_audit(audit_record)
+    if response.success and request.tool_name in {"restart_vm", "scale_cluster", "modify_ha_policy"}:
+        payload = response.data if isinstance(response.data, dict) else {"result": response.data}
+        resource_id = request.params.get("vm_id") or request.params.get("cluster_id") or "unknown"
+        memory_db.append_mock_change(request.task_id, request.tool_name, resource_id, payload)
     TOOL_CALLS.labels(request.tool_name, str(response.success).lower()).inc()
     TOOL_LATENCY.labels(request.tool_name).observe(response.execution_time_ms / 1000)
     return response

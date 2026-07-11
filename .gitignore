@@ -8,3 +8,4 @@ dist/
 data/
 output/
 .playwright-cli/
+eval/report.json

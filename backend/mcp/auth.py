@@ -9,8 +9,16 @@ from fastapi import Header, HTTPException
 
 
 JWT_ALGORITHM = "HS256"
-JWT_SECRET = os.getenv("DCS_JWT_SECRET", "clawsphere-local-demo-secret-change-me-now")
-ALLOW_ANONYMOUS = os.getenv("DCS_ALLOW_ANONYMOUS", "true").lower() == "true"
+DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
+JWT_SECRET = os.getenv("DCS_JWT_SECRET")
+if not JWT_SECRET:
+    if DEMO_MODE:
+        JWT_SECRET = "clawsphere-demo-only-secret-do-not-use-production"
+    else:
+        raise RuntimeError("DCS_JWT_SECRET is required when DEMO_MODE=false")
+if not DEMO_MODE and len(JWT_SECRET) < 32:
+    raise RuntimeError("DCS_JWT_SECRET must contain at least 32 characters")
+ALLOW_ANONYMOUS = DEMO_MODE and os.getenv("DCS_ALLOW_ANONYMOUS", "true").lower() == "true"
 
 
 @dataclass(frozen=True)
@@ -56,3 +64,17 @@ def get_auth_context(authorization: str | None = Header(default=None)) -> AuthCo
     if ALLOW_ANONYMOUS:
         return AuthContext("demo-user", ["readonly"], "demo-tenant")
     raise HTTPException(status_code=401, detail="需要 Bearer 访问令牌")
+
+
+def get_mcp_auth_context() -> AuthContext:
+    token = os.getenv("MCP_AUTH_TOKEN")
+    if token:
+        return decode_token(token)
+    if DEMO_MODE:
+        roles = [role.strip() for role in os.getenv("MCP_CALLER_ROLES", "readonly").split(",") if role.strip()]
+        return AuthContext(
+            os.getenv("MCP_CALLER_USER_ID", "mcp-demo-user"),
+            roles,
+            os.getenv("MCP_CALLER_TENANT_ID", "demo-tenant"),
+        )
+    raise RuntimeError("MCP_AUTH_TOKEN is required when DEMO_MODE=false")

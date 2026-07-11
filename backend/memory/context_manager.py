@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Callable
+import re
 
 
 MAX_FULL_TURNS = 6
@@ -10,7 +11,13 @@ TOKEN_THRESHOLD = 3000
 
 
 def estimate_tokens(messages: list[dict[str, str]]) -> int:
-    return sum(max(1, len(item.get("content", "")) // 3) for item in messages)
+    total = 0
+    for item in messages:
+        content = item.get("content", "")
+        cjk = len(re.findall(r"[\u4e00-\u9fff]", content))
+        non_cjk_words = len(re.findall(r"[A-Za-z0-9_.-]+", content))
+        total += max(1, cjk + int(non_cjk_words * 1.3))
+    return total
 
 
 def deterministic_summary(messages: list[dict[str, str]]) -> str:
@@ -35,7 +42,12 @@ def manage_context_window(
     if should_compress and older:
         addition = (summarizer or deterministic_summary)(older)
         summary = "\n".join(part for part in [summary, addition] if part).strip()
-        summary = summary[-SUMMARY_MAX_CHARS:]
+        if len(summary) > SUMMARY_MAX_CHARS:
+            recursive_input = [{"role": "system", "content": summary}]
+            summary = (summarizer or deterministic_summary)(recursive_input).strip()
+        if len(summary) > SUMMARY_MAX_CHARS:
+            boundary = summary.rfind("\n", 0, SUMMARY_MAX_CHARS)
+            summary = summary[:boundary if boundary > 0 else SUMMARY_MAX_CHARS].rstrip()
     return {
         "recent_messages": recent,
         "conversation_summary": summary,

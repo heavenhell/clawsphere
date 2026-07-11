@@ -105,6 +105,25 @@ class MemoryDatabase:
                     created_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_tool_audit_task ON tool_audit(task_id, created_at);
+                CREATE TABLE IF NOT EXISTS mock_changes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    resource_id TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS tool_rate_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    resource_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'reserved',
+                    created_at TEXT NOT NULL,
+                    UNIQUE(task_id, tool_name, resource_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_rate_window
+                    ON tool_rate_events(tool_name, resource_id, created_at);
                 """
             )
 
@@ -140,9 +159,31 @@ class MemoryDatabase:
             rows = connection.execute(query, [tenant_id, *permissions, *tiers]).fetchall()
         return [dict(row) for row in rows]
 
+    def get_knowledge(self, knowledge_id: str, roles: list[str], tenant_id: str = "global") -> dict[str, Any] | None:
+        permissions = ["public"]
+        if set(roles) & {"ops", "admin"}:
+            permissions.append("internal")
+        if "admin" in roles:
+            permissions.append("confidential")
+        marks = ",".join("?" for _ in permissions)
+        with self.connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT * FROM ops_knowledge
+                WHERE id = ? AND tenant_id IN ('global', ?) AND permission IN ({marks})
+                """,
+                [knowledge_id, tenant_id, *permissions],
+            ).fetchone()
+        return dict(row) if row else None
+
     def append_turn(self, conversation_id: str, user_id: str, tenant_id: str, user_message: str, answer: str, summary: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock, self.connect() as connection:
+            owner = connection.execute(
+                "SELECT user_id, tenant_id FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone()
+            if owner and (owner["user_id"] != user_id or owner["tenant_id"] != tenant_id):
+                raise PermissionError("conversation does not belong to caller")
             connection.execute(
                 """
                 INSERT INTO conversations(id, user_id, tenant_id, summary, updated_at)
@@ -156,12 +197,33 @@ class MemoryDatabase:
                 [(conversation_id, "user", user_message, now), (conversation_id, "assistant", answer, now)],
             )
 
-    def load_conversation(self, conversation_id: str, limit: int = 12) -> tuple[list[dict[str, str]], str]:
+    def load_conversation(
+        self,
+        conversation_id: str,
+        user_id: str,
+        tenant_id: str,
+        limit: int = 12,
+    ) -> tuple[list[dict[str, str]], str]:
         with self.connect() as connection:
-            session = connection.execute("SELECT summary FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+            session = connection.execute(
+                "SELECT summary FROM conversations WHERE id = ? AND user_id = ? AND tenant_id = ?",
+                (conversation_id, user_id, tenant_id),
+            ).fetchone()
+            existing = connection.execute(
+                "SELECT 1 FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone()
+            if existing and not session:
+                raise PermissionError("conversation does not belong to caller")
             rows = connection.execute(
-                "SELECT role, content FROM conversation_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?",
-                (conversation_id, limit),
+                """
+                SELECT role, content FROM conversation_messages
+                WHERE conversation_id = ? AND EXISTS (
+                    SELECT 1 FROM conversations
+                    WHERE id = ? AND user_id = ? AND tenant_id = ?
+                )
+                ORDER BY id DESC LIMIT ?
+                """,
+                (conversation_id, conversation_id, user_id, tenant_id, limit),
             ).fetchall()
         history = [{"role": row["role"], "content": row["content"]} for row in reversed(rows)]
         return history, session["summary"] if session else ""
@@ -201,9 +263,16 @@ class MemoryDatabase:
                 ),
             )
 
-    def list_tool_audit(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_tool_audit(self, limit: int = 50, tenant_id: str | None = None) -> list[dict[str, Any]]:
+        query = "SELECT * FROM tool_audit"
+        params: list[Any] = []
+        if tenant_id:
+            query += " WHERE tenant_id = ?"
+            params.append(tenant_id)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
         with self.connect() as connection:
-            rows = connection.execute("SELECT * FROM tool_audit ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+            rows = connection.execute(query, params).fetchall()
         items = []
         for row in rows:
             item = dict(row)
@@ -211,6 +280,81 @@ class MemoryDatabase:
             item["success"] = bool(item["success"])
             items.append(item)
         return items
+
+    def count_tool_calls_since(self, tool_name: str, resource_id: str, since: str) -> int:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(*) AS count FROM tool_audit
+                WHERE tool_name = ? AND success = 1 AND created_at >= ?
+                  AND (json_extract(params, '$.vm_id') = ? OR json_extract(params, '$.cluster_id') = ?)
+                """,
+                (tool_name, since, resource_id, resource_id),
+            ).fetchone()
+        return int(row["count"])
+
+    def append_mock_change(self, task_id: str, action: str, resource_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock, self.connect() as connection:
+            cursor = connection.execute(
+                "INSERT INTO mock_changes(task_id, action, resource_id, payload, created_at) VALUES (?, ?, ?, ?, ?)",
+                (task_id, action, resource_id, json.dumps(payload, ensure_ascii=False), now),
+            )
+        return {**payload, "record_id": cursor.lastrowid, "created_at": now}
+
+    def count_mock_changes(self) -> int:
+        with self.connect() as connection:
+            row = connection.execute("SELECT COUNT(*) AS count FROM mock_changes").fetchone()
+        return int(row["count"])
+
+    def reserve_tool_rate_slot(
+        self,
+        task_id: str,
+        tool_name: str,
+        resource_id: str,
+        since: str,
+        limit: int,
+    ) -> bool:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock, self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT 1 FROM tool_rate_events WHERE task_id = ? AND tool_name = ? AND resource_id = ?",
+                (task_id, tool_name, resource_id),
+            ).fetchone()
+            if existing:
+                return True
+            count = connection.execute(
+                """
+                SELECT COUNT(*) AS count FROM tool_rate_events
+                WHERE tool_name = ? AND resource_id = ? AND created_at >= ?
+                """,
+                (tool_name, resource_id, since),
+            ).fetchone()["count"]
+            if count >= limit:
+                return False
+            connection.execute(
+                "INSERT INTO tool_rate_events(task_id, tool_name, resource_id, status, created_at) VALUES (?, ?, ?, 'reserved', ?)",
+                (task_id, tool_name, resource_id, now),
+            )
+            return True
+
+    def mark_tool_rate_executed(self, task_id: str, tool_name: str, resource_id: str) -> None:
+        with self._lock, self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE tool_rate_events SET status = 'executed'
+                WHERE task_id = ? AND tool_name = ? AND resource_id = ?
+                """,
+                (task_id, tool_name, resource_id),
+            )
+
+    def release_tool_rate_slots(self, task_id: str) -> None:
+        with self._lock, self.connect() as connection:
+            connection.execute(
+                "DELETE FROM tool_rate_events WHERE task_id = ? AND status = 'reserved'",
+                (task_id,),
+            )
 
 
 memory_db = MemoryDatabase()

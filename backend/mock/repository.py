@@ -41,6 +41,33 @@ class MockRepository(FusionComputeInterface, DoradoInterface):
     def metrics(self):
         return self._load("metrics-sample.json")
 
+    def vm_metrics(self, vm_id: str):
+        scenario = self._load("vm-metrics.json")
+        values = {**scenario["defaults"], **scenario["overrides"].get(vm_id, {})}
+        units = {
+            "cpu.usage": "%", "cpu.ready": "%", "mem.usage": "%",
+            "mem.balloon": "MB", "disk.latency": "ms", "net.drop": "%",
+        }
+        thresholds = {
+            "cpu.usage": 80, "cpu.ready": 5, "mem.usage": 85,
+            "mem.balloon": 0, "disk.latency": 20, "net.drop": 1,
+        }
+        return [
+            {
+                "metric": name,
+                "value": value,
+                "unit": units[name],
+                "status": "warning" if value > thresholds[name] else "normal",
+            }
+            for name, value in values.items()
+        ]
+
+    def cluster_daily_growth_gb(self, cluster_id: str) -> float:
+        growth = self._load("capacity-growth.json")
+        if cluster_id not in growth:
+            raise KeyError(cluster_id)
+        return float(growth[cluster_id])
+
     def storage_pool_usage(self, pool_id: str | None = None):
         pools = self.datastores()
         if pool_id:

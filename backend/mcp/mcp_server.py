@@ -7,6 +7,7 @@ from mcp.server.fastmcp import FastMCP
 
 from backend.mcp.schemas import ToolRequest
 from backend.mcp.tools import call_tool
+from backend.mcp.auth import get_mcp_auth_context
 
 
 mcp = FastMCP(
@@ -16,7 +17,14 @@ mcp = FastMCP(
 
 
 def _call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    response = call_tool(ToolRequest(tool_name=name, params=arguments))
+    auth = get_mcp_auth_context()
+    response = call_tool(ToolRequest(
+        tool_name=name,
+        params=arguments,
+        caller_user_id=auth.user_id,
+        caller_roles=auth.roles,
+        tenant_id=auth.tenant_id,
+    ))
     return response.model_dump(mode="json")
 
 
