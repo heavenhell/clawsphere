@@ -15,6 +15,10 @@ from backend.mcp.schemas import (
     AlarmListParams,
     ApprovalRequestParams,
     ClusterCapacityParams,
+    EdmeAlarmParams,
+    EdmeHistoryParams,
+    EdmeMetricCatalogParams,
+    EdmeResourceParams,
     EmptyParams,
     ForecastParams,
     ModifyHaPolicyParams,
@@ -177,6 +181,37 @@ def run_capacity_forecast(cluster_id: str, forecast_days: int = 30):
 @mcp_tool("get_storage_pool_usage", "查询 Dorado 存储池容量和时延", StoragePoolParams)
 def get_storage_pool_usage(pool_id: str | None = None):
     return repo.storage_pool_usage(pool_id)
+
+
+@mcp_tool("query_edme_current_alarms", "查询 eDME 运维面当前告警", EdmeAlarmParams)
+def query_edme_current_alarms(severity: int | None = None, iterator: str | None = None):
+    return repo.edme_current_alarms(severity, iterator)
+
+
+@mcp_tool("query_edme_resources", "查询 eDME 系统资源实例", EdmeResourceParams)
+def query_edme_resources(class_name: str = "SYS_StorageDevice", page_no: int = 1, page_size: int = 20):
+    return repo.edme_resource_instances(class_name, page_no, page_size)
+
+
+@mcp_tool("get_edme_metric_catalog", "查询 eDME 监控对象及性能指标目录", EdmeMetricCatalogParams)
+def get_edme_metric_catalog(object_type_id: int | None = None):
+    return {
+        "object_types": repo.edme_object_types(),
+        "indicators": repo.edme_indicators(object_type_id),
+    }
+
+
+@mcp_tool("query_edme_performance_history", "查询 eDME 历史性能数据", EdmeHistoryParams)
+def query_edme_performance_history(
+    object_ids: list[str] | None = None,
+    indicator_ids: list[int] | None = None,
+    time_range: str = "LAST_1_HOUR",
+):
+    return {
+        "time_range": time_range,
+        "series": repo.edme_history(object_ids, indicator_ids, time_range),
+        "indicators": repo.edme_indicators(),
+    }
 
 
 @mcp_tool(

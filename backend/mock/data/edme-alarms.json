@@ -1,0 +1,28 @@
+[
+  {
+    "alarmId": "edme-alarm-1001",
+    "alarmName": "Storage pool capacity threshold exceeded",
+    "severity": 2,
+    "cleared": 0,
+    "acked": 0,
+    "meName": "EDME-Storage-02",
+    "moi": "edme-storage-002",
+    "productName": "OceanStor Dorado",
+    "probableCause": "The used capacity ratio remained above 90% for 15 minutes.",
+    "firstOccurUtc": 1783792800000,
+    "latestOccurUtc": 1783793700000
+  },
+  {
+    "alarmId": "edme-alarm-1002",
+    "alarmName": "Storage front-end port latency is high",
+    "severity": 3,
+    "cleared": 0,
+    "acked": 1,
+    "meName": "EDME-Storage-01",
+    "moi": "edme-storage-001",
+    "productName": "OceanStor Dorado",
+    "probableCause": "The average read latency exceeded the configured warning threshold.",
+    "firstOccurUtc": 1783793100000,
+    "latestOccurUtc": 1783794000000
+  }
+]

@@ -5,10 +5,11 @@ from pathlib import Path
 from statistics import mean
 
 from backend.interfaces.dorado import DoradoInterface
+from backend.interfaces.edme import EDMEInterface
 from backend.interfaces.fusioncompute import FusionComputeInterface
 
 
-class MockRepository(FusionComputeInterface, DoradoInterface):
+class MockRepository(FusionComputeInterface, DoradoInterface, EDMEInterface):
     def __init__(self, base_dir: Path | None = None):
         self.base_dir = base_dir or Path(__file__).resolve().parent
         self.data_dir = self.base_dir / "data"
@@ -73,6 +74,47 @@ class MockRepository(FusionComputeInterface, DoradoInterface):
         if pool_id:
             pools = [pool for pool in pools if pool["id"] == pool_id]
         return pools
+
+    def edme_current_alarms(self, severity: int | None = None, iterator: str | None = None):
+        alarms = self._load("edme-alarms.json")
+        if severity is not None:
+            alarms = [alarm for alarm in alarms if alarm.get("severity") == severity]
+        return {"hits": alarms, "iterator": None, "resCode": 1}
+
+    def edme_resource_instances(self, class_name: str, page_no: int = 1, page_size: int = 20):
+        resources = self._load("edme-resources.json").get(class_name, [])
+        start = (page_no - 1) * page_size
+        page = resources[start:start + page_size]
+        total = len(resources)
+        return {
+            "objList": page,
+            "totalNum": total,
+            "pageSize": page_size,
+            "totalPageNo": max(1, (total + page_size - 1) // page_size),
+            "currentPage": page_no,
+        }
+
+    def edme_object_types(self):
+        return self._load("edme-metrics.json")["objectTypes"]
+
+    def edme_indicators(self, object_type_id: int | None = None):
+        indicators = self._load("edme-metrics.json")["indicators"]
+        if object_type_id is not None:
+            indicators = [item for item in indicators if item["objectTypeId"] == object_type_id]
+        return indicators
+
+    def edme_history(
+        self,
+        object_ids: list[str] | None = None,
+        indicator_ids: list[int] | None = None,
+        time_range: str = "LAST_1_HOUR",
+    ):
+        points = self._load("edme-metrics.json")["history"]
+        if object_ids:
+            points = [point for point in points if point["objectId"] in object_ids]
+        if indicator_ids:
+            points = [point for point in points if point["indicatorId"] in indicator_ids]
+        return [{**point, "range": time_range} for point in points]
 
     def overview(self) -> dict:
         clusters = self.clusters()

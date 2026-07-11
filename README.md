@@ -12,7 +12,7 @@ flowchart LR
     AGENT --> GUARD[RBAC + Risk + Rate Limit]
     GUARD --> MCP[MCP Tool Gateway]
     GUARD --> HITL[Durable HITL Approval]
-    MCP --> MOCK[FusionCompute / Dorado Mock]
+    MCP --> MOCK[FusionCompute / Dorado / eDME Mock]
     AGENT --> MEMORY[Conversation + Checkpoint]
     MCP --> AUDIT[Audit + Prometheus]
 ```

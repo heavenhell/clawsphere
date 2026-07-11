@@ -1,0 +1,52 @@
+{
+  "SYS_StorageDevice": [
+    {
+      "id": "47FEBD5002AB344D90EC6CFCD6127BA3",
+      "pid": "47FEBD5002AB344D90EC6CFCD6127BA3",
+      "name": "EDME-Storage-01",
+      "className": "SYS_StorageDevice",
+      "productName": "OceanStor Dorado 6000 V6",
+      "managementIp": "10.20.30.41",
+      "healthStatus": "normal",
+      "totalCapacityGB": 102400,
+      "freeCapacityGB": 35840,
+      "dataStatus": "normal"
+    },
+    {
+      "id": "BAD43F19D4424E8BB9982F44AE783210",
+      "pid": "BAD43F19D4424E8BB9982F44AE783210",
+      "name": "EDME-Storage-02",
+      "className": "SYS_StorageDevice",
+      "productName": "OceanStor Dorado 5000 V6",
+      "managementIp": "10.20.30.42",
+      "healthStatus": "warning",
+      "totalCapacityGB": 51200,
+      "freeCapacityGB": 4096,
+      "dataStatus": "normal"
+    }
+  ],
+  "SYS_StoragePool": [
+    {
+      "id": "A119E91C3D2A4A96B07F7E6067E22901",
+      "pid": "A119E91C3D2A4A96B07F7E6067E22901",
+      "name": "EDME-SSD-Pool-01",
+      "className": "SYS_StoragePool",
+      "parentId": "47FEBD5002AB344D90EC6CFCD6127BA3",
+      "healthStatus": "normal",
+      "totalCapacityGB": 81920,
+      "freeCapacityGB": 24576,
+      "dataStatus": "normal"
+    },
+    {
+      "id": "A119E91C3D2A4A96B07F7E6067E22902",
+      "pid": "A119E91C3D2A4A96B07F7E6067E22902",
+      "name": "EDME-SSD-Pool-02",
+      "className": "SYS_StoragePool",
+      "parentId": "BAD43F19D4424E8BB9982F44AE783210",
+      "healthStatus": "warning",
+      "totalCapacityGB": 40960,
+      "freeCapacityGB": 2867,
+      "dataStatus": "normal"
+    }
+  ]
+}

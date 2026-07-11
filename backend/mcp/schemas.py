@@ -47,6 +47,27 @@ class StoragePoolParams(ToolParams):
     pool_id: str | None = Field(default=None, pattern=r"^ds-\d+$")
 
 
+class EdmeAlarmParams(ToolParams):
+    severity: int | None = Field(default=None, ge=1, le=4)
+    iterator: str | None = Field(default=None, max_length=64)
+
+
+class EdmeResourceParams(ToolParams):
+    class_name: str = Field(default="SYS_StorageDevice", pattern=r"^SYS_[A-Za-z0-9_]+$")
+    page_no: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=1000)
+
+
+class EdmeMetricCatalogParams(ToolParams):
+    object_type_id: int | None = Field(default=None, ge=1)
+
+
+class EdmeHistoryParams(ToolParams):
+    object_ids: list[str] | None = Field(default=None, max_length=512)
+    indicator_ids: list[int] | None = Field(default=None, max_length=100)
+    time_range: str = Field(default="LAST_1_HOUR", pattern=r"^LAST_[1-9]\d*_(MINUTE|HOUR|DAY)S?$")
+
+
 class ProposedToolCall(ToolParams):
     tool_name: str = Field(min_length=3, max_length=80)
     params: dict[str, Any]

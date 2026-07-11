@@ -51,7 +51,7 @@ class CopilotState(TypedDict, total=False):
     error: str | None
 
 
-SYSTEM_PROMPT = f"""你是 DCS/FusionCompute 运维 Copilot。
+SYSTEM_PROMPT = f"""你是 DCS/FusionCompute/eDME 运维 Copilot。
 回答要自然，但在识别到运维意图时必须基于工具结果和检索到的 Skill。
 不要编造工具结果之外的资源状态。写操作、变更、重启、删除、扩容只能进入审批，不能声称已执行。
 输出优先包含：结论、证据、建议动作、风险/下一步。
@@ -70,6 +70,8 @@ def classify_intent(message: str) -> str:
         return "smalltalk"
     if detect_write_intent(message):
         return "change_execute"
+    if "edme" in stripped.lower():
+        return "edme_operations"
     if _contains(message, ["第一条", "第二条", "第三条", "上一条", "下一条", "这条", "那条", "它呢"]):
         return "alert_explain"
     if _contains(message, ["告警", "报警", "alarm"]):
@@ -117,6 +119,7 @@ def make_plan(intent: str, message: str) -> list[str]:
         "capacity_forecast": ["查询集群容量", "运行容量预测", "输出风险等级和建议"],
         "vm_diagnosis": ["查询 VM 详情", "查询 VM 性能指标", "关联告警并给出诊断"],
         "resource_query": ["查询资源总览", "按用户问题筛选资源类型", "输出数量或列表"],
+        "edme_operations": ["识别 eDME 运维对象", "查询 eDME 资源、告警或性能数据", "基于结果给出结论"],
         "change_execute": ["识别高风险变更", "进入护栏和审批流程", "不直接执行"],
         "smalltalk": ["自然回应"],
     }
@@ -124,6 +127,19 @@ def make_plan(intent: str, message: str) -> list[str]:
 
 
 def plan_tools(intent: str, message: str, history: list[dict[str, str]]) -> list[dict[str, Any]]:
+    if intent == "edme_operations":
+        if _contains(message, ["告警", "报警", "alarm"]):
+            return [{"tool_name": "query_edme_current_alarms", "params": {}}]
+        if _contains(message, ["性能", "指标", "延迟", "IOPS", "iops"]):
+            return [
+                {"tool_name": "query_edme_resources", "params": {"class_name": "SYS_StorageDevice"}},
+                {"tool_name": "get_edme_metric_catalog", "params": {}},
+                {"tool_name": "query_edme_performance_history", "params": {"time_range": "LAST_1_HOUR"}},
+            ]
+        return [
+            {"tool_name": "query_edme_resources", "params": {"class_name": "SYS_StorageDevice"}},
+            {"tool_name": "query_edme_current_alarms", "params": {}},
+        ]
     if intent == "alert_explain":
         calls = [{"tool_name": "list_alarms", "params": {}}]
         alarm_id = extract_alarm_id(message, history)
@@ -228,7 +244,15 @@ def planner(state: CopilotState) -> CopilotState:
         if detail:
             docs.append(detail)
     llm_plan = None
-    if state["intent"] not in {"smalltalk", "general"}:
+    if state["intent"] not in {"smalltalk", "general", "change_execute"}:
+        intent_tools = {
+            "edme_operations": {
+                "query_edme_current_alarms",
+                "query_edme_resources",
+                "get_edme_metric_catalog",
+                "query_edme_performance_history",
+            },
+        }.get(state["intent"])
         tool_catalog = [
             {
                 "type": "function",
@@ -240,6 +264,7 @@ def planner(state: CopilotState) -> CopilotState:
             }
             for spec in TOOL_REGISTRY.values()
             if any(role in spec.auth_roles for role in state["user_roles"])
+            and (intent_tools is None or spec.name in intent_tools)
         ]
         try:
             llm_plan = call_deepseek_tool_plan(
@@ -437,6 +462,33 @@ def _respond_change(state: CopilotState, _data: dict[str, Any]) -> str:
     return "该请求涉及写操作，已按护栏要求进入审批流程，审批前不会执行变更。"
 
 
+def _respond_edme(state: CopilotState, data: dict[str, Any]) -> str:
+    message = state["message"]
+    if _contains(message, ["告警", "报警", "alarm"]):
+        alarms = (data.get("query_edme_current_alarms") or {}).get("hits", [])
+        lines = "\n".join(
+            f"- {item['alarmId']}：{item['alarmName']}，级别 {item['severity']}，对象 {item['meName']}，可能原因：{item['probableCause']}"
+            for item in alarms
+        )
+        return f"eDME 当前共有 {len(alarms)} 条活动告警。\n\n{lines}"
+    if _contains(message, ["性能", "指标", "延迟", "IOPS", "iops"]):
+        history = data.get("query_edme_performance_history") or {}
+        names = {item["id"]: item for item in history.get("indicators", [])}
+        lines = "\n".join(
+            f"- {point['objectId']}：{names.get(point['indicatorId'], {}).get('name', point['indicatorId'])}="
+            f"{point['value']}{names.get(point['indicatorId'], {}).get('unit', '')}"
+            for point in history.get("series", [])
+        )
+        return f"eDME 最近一小时性能数据如下：\n\n{lines}"
+    resources = (data.get("query_edme_resources") or {}).get("objList", [])
+    alarms = (data.get("query_edme_current_alarms") or {}).get("hits", [])
+    lines = "\n".join(
+        f"- {item['name']}：{item['healthStatus']}，剩余 {item['freeCapacityGB']}GB / 总量 {item['totalCapacityGB']}GB，管理 IP {item['managementIp']}"
+        for item in resources
+    )
+    return f"eDME 当前纳管 {len(resources)} 台存储设备，活动告警 {len(alarms)} 条。\n\n{lines}"
+
+
 def deterministic_response(state: CopilotState) -> str:
     intent = state["intent"]
     if state.get("error"):
@@ -453,6 +505,7 @@ def deterministic_response(state: CopilotState) -> str:
         "capacity_forecast": _respond_capacity,
         "vm_diagnosis": _respond_vm,
         "resource_query": _respond_resource,
+        "edme_operations": _respond_edme,
         "change_execute": _respond_change,
     }
     handler = handlers.get(intent)

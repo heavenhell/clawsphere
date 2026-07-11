@@ -13,7 +13,7 @@ from backend.mcp.auth import get_mcp_auth_context
 
 mcp = FastMCP(
     "ClawSphere DCS Operations",
-    instructions="FusionCompute and Dorado operations tools with RBAC and audit logging.",
+    instructions="FusionCompute, Dorado and eDME operations tools with RBAC and audit logging.",
 )
 
 
@@ -76,6 +76,46 @@ def run_capacity_forecast(cluster_id: str, forecast_days: int = 30) -> dict[str,
 def get_storage_pool_usage(pool_id: str | None = None) -> dict[str, Any]:
     """Read Dorado storage pool capacity and latency."""
     return _call("get_storage_pool_usage", {"pool_id": pool_id})
+
+
+@mcp.tool()
+def query_edme_current_alarms(severity: int | None = None, iterator: str | None = None) -> dict[str, Any]:
+    """Query current alarms from the eDME operations-plane model."""
+    return _call("query_edme_current_alarms", {"severity": severity, "iterator": iterator})
+
+
+@mcp.tool()
+def query_edme_resources(
+    class_name: str = "SYS_StorageDevice",
+    page_no: int = 1,
+    page_size: int = 20,
+) -> dict[str, Any]:
+    """Query eDME resource instances by system resource class."""
+    return _call("query_edme_resources", {
+        "class_name": class_name,
+        "page_no": page_no,
+        "page_size": page_size,
+    })
+
+
+@mcp.tool()
+def get_edme_metric_catalog(object_type_id: int | None = None) -> dict[str, Any]:
+    """List eDME monitoring object types and supported indicators."""
+    return _call("get_edme_metric_catalog", {"object_type_id": object_type_id})
+
+
+@mcp.tool()
+def query_edme_performance_history(
+    object_ids: list[str] | None = None,
+    indicator_ids: list[int] | None = None,
+    time_range: str = "LAST_1_HOUR",
+) -> dict[str, Any]:
+    """Query eDME historical performance data for resources and indicators."""
+    return _call("query_edme_performance_history", {
+        "object_ids": object_ids,
+        "indicator_ids": indicator_ids,
+        "time_range": time_range,
+    })
 
 
 @mcp.tool()

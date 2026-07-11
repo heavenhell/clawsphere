@@ -1,0 +1,22 @@
+{
+  "objectTypes": [
+    {"id": 1407379178520576, "name": "SYS_StorageDevice", "displayName": "Storage device"},
+    {"id": 1407379178520577, "name": "SYS_StoragePool", "displayName": "Storage pool"}
+  ],
+  "indicators": [
+    {"id": 1407379178586113, "objectTypeId": 1407379178520576, "name": "used_capacity_ratio", "unit": "%"},
+    {"id": 1407379178586114, "objectTypeId": 1407379178520576, "name": "read_latency", "unit": "ms"},
+    {"id": 1407379178586115, "objectTypeId": 1407379178520576, "name": "write_latency", "unit": "ms"},
+    {"id": 1407379178586116, "objectTypeId": 1407379178520576, "name": "total_iops", "unit": "IOPS"}
+  ],
+  "history": [
+    {"objectId": "47FEBD5002AB344D90EC6CFCD6127BA3", "indicatorId": 1407379178586113, "timestamp": 1783794000000, "value": 65.0},
+    {"objectId": "47FEBD5002AB344D90EC6CFCD6127BA3", "indicatorId": 1407379178586114, "timestamp": 1783794000000, "value": 8.2},
+    {"objectId": "47FEBD5002AB344D90EC6CFCD6127BA3", "indicatorId": 1407379178586115, "timestamp": 1783794000000, "value": 10.6},
+    {"objectId": "47FEBD5002AB344D90EC6CFCD6127BA3", "indicatorId": 1407379178586116, "timestamp": 1783794000000, "value": 18240},
+    {"objectId": "BAD43F19D4424E8BB9982F44AE783210", "indicatorId": 1407379178586113, "timestamp": 1783794000000, "value": 92.0},
+    {"objectId": "BAD43F19D4424E8BB9982F44AE783210", "indicatorId": 1407379178586114, "timestamp": 1783794000000, "value": 24.8},
+    {"objectId": "BAD43F19D4424E8BB9982F44AE783210", "indicatorId": 1407379178586115, "timestamp": 1783794000000, "value": 31.4},
+    {"objectId": "BAD43F19D4424E8BB9982F44AE783210", "indicatorId": 1407379178586116, "timestamp": 1783794000000, "value": 25780}
+  ]
+}

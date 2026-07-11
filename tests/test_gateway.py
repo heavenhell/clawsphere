@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from backend.app import app
 from backend.mcp.schemas import ToolRequest
+from backend.agent.copilot import classify_intent, plan_tools
 from backend.mcp.tools import TOOL_REGISTRY, call_tool
 from backend.memory.database import memory_db
 
@@ -24,6 +25,53 @@ def test_mock_scenario_has_normal_and_abnormal_resources():
     assert len(client.get("/mock/fusioncompute/vms").json()) == 5
     assert len(client.get("/mock/fusioncompute/alarms").json()) == 5
     assert len(client.get("/mock/dorado/storage-pools").json()) == 3
+
+
+def test_edme_mock_requires_session_and_exposes_operations_apis():
+    unauthenticated = client.post(
+        "/mock/edme/rest/alarmmgmt/v1/alarms/current-alarm/query",
+        json={"query": {}},
+    )
+    assert unauthenticated.status_code == 403
+
+    login = client.put(
+        "/mock/edme/rest/plat/smapp/v1/sessions",
+        json={"grantType": "password", "userName": "northbound", "value": "demo-secret"},
+    )
+    token = login.json()["accessSession"]
+    headers = {"X-Auth-Token": token}
+
+    alarms = client.post(
+        "/mock/edme/rest/alarmmgmt/v1/alarms/current-alarm/query",
+        headers=headers,
+        json={"query": {"severity": 2}},
+    ).json()
+    assert len(alarms["hits"]) == 1
+    assert alarms["hits"][0]["alarmId"] == "edme-alarm-1001"
+
+    resources = client.get(
+        "/mock/edme/rest/resourcedb/v1/instances/SYS_StorageDevice",
+        headers=headers,
+    ).json()
+    assert resources["totalNum"] == 2
+
+    history = client.post(
+        "/mock/edme/rest/metrics/v1/data-svc/history-data/action/query",
+        headers=headers,
+        json={"obj_ids": ["BAD43F19D4424E8BB9982F44AE783210"], "range": "LAST_1_HOUR"},
+    ).json()
+    assert len(history["data"]) == 4
+
+
+def test_edme_agent_routing_and_tools_are_available():
+    assert classify_intent("eDME 现在有哪些存储资源？") == "edme_operations"
+    calls = plan_tools("edme_operations", "查询 eDME 性能指标", [])
+    assert [call["tool_name"] for call in calls] == [
+        "query_edme_resources",
+        "get_edme_metric_catalog",
+        "query_edme_performance_history",
+    ]
+    assert "query_edme_current_alarms" in TOOL_REGISTRY
 
 
 def test_tool_schema_rejects_invalid_parameters():
