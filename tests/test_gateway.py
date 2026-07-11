@@ -50,3 +50,9 @@ def test_tool_audit_is_persisted():
     response = call_tool(ToolRequest(tool_name="list_alarms", params={}, task_id="audit-test"))
     records = memory_db.list_tool_audit(20)
     assert any(item["audit_id"] == response.audit_id and item["task_id"] == "audit-test" for item in records)
+
+
+def test_prometheus_metrics_are_exposed():
+    response = client.get("/metrics/")
+    assert response.status_code == 200
+    assert "clawsphere_http_requests_total" in response.text

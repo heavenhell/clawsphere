@@ -19,6 +19,7 @@ from backend.memory.database import memory_db
 from backend.memory.retriever import retrieve, retrieve_history, retrieve_skill_detail
 from backend.memory.store import write_conversation_summary
 from backend.skills.loader import startup_skill_summaries
+from backend.observability import observe_agent
 
 
 class CopilotState(TypedDict, total=False):
@@ -299,6 +300,9 @@ def deterministic_response(state: CopilotState) -> str:
     intent = state["intent"]
     message = state["message"]
     if state.get("error"):
+        if intent == "vm_diagnosis" and "虚拟机不存在" in state["error"]:
+            vm_id = extract_vm_id(message)
+            return f"未找到虚拟机 {vm_id}，因此没有生成性能结论。请确认 VM ID 或名称后重试。"
         return f"请求被护栏拦截：{state['error']}"
     if state.get("final_response"):
         return state["final_response"]
@@ -323,6 +327,11 @@ def deterministic_response(state: CopilotState) -> str:
         forecast = data.get("run_capacity_forecast") or {}
         return f"结论：{forecast.get('cluster_id')} 容量风险为 {forecast.get('risk_level')}。\n\n证据：日增长约 {forecast.get('daily_growth_gb')}GB，预计 {forecast.get('days_to_exhaustion')} 天后耗尽。\n\n建议动作：{forecast.get('recommendation')}"
     if intent == "vm_diagnosis":
+        failed = [item for item in state.get("tool_results", []) if not item.get("success")]
+        detail = data.get("get_vm_detail")
+        if failed or not detail:
+            vm_id = extract_vm_id(message)
+            return f"未找到虚拟机 {vm_id}，因此没有生成性能结论。请确认 VM ID 或名称后重试。"
         metrics = (data.get("get_vm_metrics") or {}).get("series", [])
         warnings = [m for m in metrics if m.get("status") == "warning"]
         warning_text = "；".join(f"{m['metric']}={m['value']}{m['unit']}" for m in warnings) or "未发现明显异常"
@@ -461,6 +470,7 @@ def _format_result(state: dict[str, Any], conversation_id: str) -> dict[str, Any
     }
 
 
+@observe_agent
 def run_copilot(
     message: str,
     roles: list[str] | None = None,

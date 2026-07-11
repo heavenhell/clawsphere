@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from prometheus_client import make_asgi_app
+from time import perf_counter
 
 from backend.agent.copilot import resume_copilot, run_copilot
 from backend.guardrails.approvals import approval_store
@@ -13,6 +15,7 @@ from backend.mcp.schemas import ToolRequest
 from backend.mcp.tools import TOOL_REGISTRY, call_tool
 from backend.mock.repository import repo
 from backend.mock.api import router as mock_router
+from backend.observability import APPROVAL_DECISIONS, HTTP_LATENCY, HTTP_REQUESTS, INTENT_COUNT
 
 
 class ChatRequest(BaseModel):
@@ -44,6 +47,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(mock_router)
+app.mount("/metrics", make_asgi_app())
+
+
+@app.middleware("http")
+async def collect_http_metrics(request, call_next):
+    started = perf_counter()
+    response = await call_next(request)
+    route = request.scope.get("route")
+    path = getattr(route, "path", request.url.path)
+    HTTP_REQUESTS.labels(request.method, path, response.status_code).inc()
+    HTTP_LATENCY.labels(path).observe(perf_counter() - started)
+    return response
 
 
 @app.get("/api/health")
@@ -87,7 +102,7 @@ def tool_call(request: ToolRequest, auth: AuthContext = Depends(get_auth_context
 
 @app.post("/api/chat")
 def chat(request: ChatRequest, auth: AuthContext = Depends(get_auth_context)):
-    return run_copilot(
+    result = run_copilot(
         request.message,
         auth.roles,
         request.history,
@@ -96,6 +111,8 @@ def chat(request: ChatRequest, auth: AuthContext = Depends(get_auth_context)):
         auth.user_id,
         auth.tenant_id,
     )
+    INTENT_COUNT.labels(result.get("intent") or "unknown").inc()
+    return result
 
 
 @app.get("/api/audit")
@@ -125,6 +142,7 @@ def decide_approval(
         raise HTTPException(status_code=409, detail="审批项已处理")
     if approval["risk"] == "high" and "admin" not in auth.roles:
         raise HTTPException(status_code=403, detail="高风险变更必须由 admin 审批")
+    APPROVAL_DECISIONS.labels("approved" if request.approved else "rejected").inc()
     return resume_copilot(
         approval["conversation_id"],
         request.approved,

@@ -3,6 +3,7 @@
 华为 DCS/FusionCompute 运维 Agent demo，包含：
 
 - React/Vite 运维 Copilot 前端
+- 独立查询工作台与管理员审批台
 - FastAPI tool gateway
 - LangGraph 风格 Agent 编排
 - DeepSeek LLM 接入
@@ -25,6 +26,11 @@ cd E:\tmp\code\dcs-copilot-demo
 cd E:\tmp\code\dcs-copilot-demo\frontend
 pnpm dev --host 127.0.0.1 --port 5174
 ```
+
+页面地址：
+
+- 查询工作台：http://127.0.0.1:5174/
+- 管理员审批台：http://127.0.0.1:5174/approval
 
 DeepSeek API key 从环境变量读取：
 
@@ -84,3 +90,15 @@ ops/admin 发起重启、扩容或 HA 修改后，LangGraph 在工具执行前 `
 审批项可从 `GET /api/approvals` 查询，并通过
 `POST /api/approvals/{approval_id}/decision` 批准或拒绝；高风险操作必须由
 admin 令牌审批。批准后使用原 conversation id 从 checkpoint 恢复，拒绝时不会调用写工具。
+
+## Quality and observability
+
+```powershell
+python -m pytest -q
+python -m eval.evaluator
+```
+
+评测报告包含意图、工具、事实和安全四个维度，默认质量门禁为 90%，安全维度必须
+达到 100%。Prometheus 指标位于 `http://127.0.0.1:8010/metrics/`。配置
+`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY` 与 `LANGFUSE_BASE_URL` 后，Agent
+运行会写入 Langfuse v4 Trace；未配置时不会影响本地运行。

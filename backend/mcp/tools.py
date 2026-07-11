@@ -29,6 +29,7 @@ from backend.mcp.schemas import (
 )
 from backend.mock.repository import repo
 from backend.memory.database import memory_db
+from backend.observability import TOOL_CALLS, TOOL_LATENCY
 
 
 @dataclass(frozen=True)
@@ -148,7 +149,9 @@ def get_vm_detail(vm_id: str):
 @mcp_tool("get_vm_metrics", "查询虚拟机性能指标", VmMetricsParams)
 def get_vm_metrics(vm_id: str, metric_names: list[str] | None = None, time_range: str = "1h"):
     detail = get_vm_detail(vm_id)
-    vm = detail["vm"] if detail else {"id": vm_id, "name": vm_id}
+    if not detail:
+        raise ValueError(f"虚拟机不存在：{vm_id}")
+    vm = detail["vm"]
     cpu_usage = 86 if vm.get("name") == "dcs-app-01" else 42
     cpu_ready = 6.8 if vm.get("name") == "dcs-app-01" else 1.1
     balloon = 640 if vm.get("name") == "dcs-cache-01" else 0
@@ -328,4 +331,6 @@ def call_tool(request: ToolRequest) -> ToolResponse:
         }
     AUDIT_LOG.append(audit_record)
     memory_db.append_tool_audit(audit_record)
+    TOOL_CALLS.labels(request.tool_name, str(response.success).lower()).inc()
+    TOOL_LATENCY.labels(request.tool_name).observe(response.execution_time_ms / 1000)
     return response

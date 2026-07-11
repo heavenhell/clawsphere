@@ -10,3 +10,5 @@ psycopg[binary]>=3.2,<4
 pgvector>=0.4,<1
 langgraph-checkpoint-sqlite==2.0.11
 langgraph-checkpoint-postgres==2.0.25
+prometheus-client>=0.22,<1
+langfuse>=4,<5

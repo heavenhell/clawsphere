@@ -6,10 +6,14 @@ import {
   BarChart3,
   Bot,
   CheckCircle2,
+  XCircle,
   Cpu,
   Database,
   FileClock,
   Send,
+  LogIn,
+  RefreshCw,
+  ArrowLeft,
   ShieldAlert,
   Server,
   TerminalSquare,
@@ -30,7 +34,7 @@ function metricPercent(value) {
   return `${Math.round((value || 0) * 100)}%`;
 }
 
-function App() {
+function QueryApp() {
   const [conversationId] = useState(() => {
     const existing = localStorage.getItem('clawsphere-conversation-id');
     const value = existing || crypto.randomUUID();
@@ -227,12 +231,8 @@ function App() {
 
         <section className="panel">
           <h2><ShieldAlert size={16} />审批队列</h2>
-          {approvals.length ? approvals.map((item) => (
-            <div className="approval" key={item.id}>
-              <span>{item.title}</span>
-              <strong>{item.status}</strong>
-            </div>
-          )) : <p className="muted">暂无待审批变更</p>}
+          <p className="muted">高风险变更由独立审批台处理。</p>
+          <a className="approvalLink" href="/approval"><ShieldAlert size={14} />进入审批台</a>
         </section>
 
         <section className="panel">
@@ -261,6 +261,158 @@ function App() {
   );
 }
 
+function ApprovalApp() {
+  const [token, setToken] = useState(() => sessionStorage.getItem('clawsphere-admin-token') || '');
+  const [approvals, setApprovals] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState('');
+
+  const loadApprovals = async (accessToken = token) => {
+    if (!accessToken) return;
+    const response = await fetch(`${API_BASE}/api/approvals`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) throw new Error('审批身份已失效');
+    const items = await response.json();
+    setApprovals(items);
+    setSelectedId((current) => current || items[0]?.id || null);
+  };
+
+  const login = async () => {
+    setBusy(true);
+    setResult('');
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/demo-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 'demo-admin', roles: ['admin'], tenant_id: 'demo-tenant' }),
+      });
+      const data = await response.json();
+      sessionStorage.setItem('clawsphere-admin-token', data.access_token);
+      setToken(data.access_token);
+      await loadApprovals(data.access_token);
+    } catch (error) {
+      setResult(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (token) loadApprovals(token).catch((error) => setResult(error.message));
+  }, [token]);
+
+  const decide = async (approvalId, approved) => {
+    setBusy(true);
+    setResult('');
+    try {
+      const response = await fetch(`${API_BASE}/api/approvals/${approvalId}/decision`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ approved, reason: approved ? '演示管理员批准' : '演示管理员拒绝' }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || '审批失败');
+      setResult(data.answer || '审批已处理');
+      await loadApprovals();
+    } catch (error) {
+      setResult(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!token) {
+    return (
+      <main className="approvalLogin">
+        <div className="loginMark"><ShieldAlert size={28} /></div>
+        <h1>ClawSphere 审批台</h1>
+        <p>高风险变更需要管理员确认后才能从断点继续。</p>
+        <button type="button" onClick={login} disabled={busy}><LogIn size={17} />管理员演示登录</button>
+        <a href="/"><ArrowLeft size={14} />返回查询工作台</a>
+        {result && <div className="decisionResult">{result}</div>}
+      </main>
+    );
+  }
+
+  const selected = approvals.find((item) => item.id === selectedId) || approvals[0];
+  return (
+    <main className="approvalShell">
+      <aside className="approvalSidebar">
+        <header className="approvalBrand">
+          <div className="brandMark"><ShieldAlert size={21} /></div>
+          <div><h1>变更审批</h1><p>admin · demo-tenant</p></div>
+        </header>
+        <a className="backLink" href="/"><ArrowLeft size={14} />查询工作台</a>
+        <div className="queueTitle">
+          <span>审批队列</span>
+          <button type="button" title="刷新" onClick={() => loadApprovals()}><RefreshCw size={15} /></button>
+        </div>
+        <div className="approvalQueue">
+          {approvals.map((item) => (
+            <button
+              type="button"
+              className={item.id === selected?.id ? 'queueItem active' : 'queueItem'}
+              key={item.id}
+              onClick={() => setSelectedId(item.id)}
+            >
+              <span>{item.description}</span>
+              <small>{item.id} · {item.status}</small>
+            </button>
+          ))}
+          {!approvals.length && <p className="emptyQueue">暂无审批记录</p>}
+        </div>
+      </aside>
+
+      <section className="approvalMain">
+        <header className="approvalHeader">
+          <div><h2>审批详情</h2><p>所有决定都会写入审计日志</p></div>
+          <span className="adminBadge">管理员</span>
+        </header>
+        {selected ? (
+          <div className="approvalDetail">
+            <div className="detailTitle">
+              <div><span className={`severity ${selected.risk}`}>{selected.risk}</span><h2>{selected.description}</h2></div>
+              <strong className={`status ${selected.status}`}>{selected.status}</strong>
+            </div>
+            <dl className="detailGrid">
+              <div><dt>审批编号</dt><dd>{selected.id}</dd></div>
+              <div><dt>发起人</dt><dd>{selected.user_id}</dd></div>
+              <div><dt>租户</dt><dd>{selected.tenant_id}</dd></div>
+              <div><dt>创建时间</dt><dd>{new Date(selected.created_at).toLocaleString()}</dd></div>
+            </dl>
+            <section className="toolReview">
+              <h3>待执行工具</h3>
+              {selected.tool_calls.map((call, index) => (
+                <div className="toolCall" key={`${call.tool_name}-${index}`}>
+                  <strong>{call.tool_name}</strong>
+                  <pre>{JSON.stringify(call.params, null, 2)}</pre>
+                </div>
+              ))}
+            </section>
+            {selected.status === 'pending' && (
+              <div className="decisionBar">
+                <button className="rejectButton" type="button" disabled={busy} onClick={() => decide(selected.id, false)}><XCircle size={17} />拒绝</button>
+                <button className="approveButton" type="button" disabled={busy} onClick={() => decide(selected.id, true)}><CheckCircle2 size={17} />批准并继续</button>
+              </div>
+            )}
+            {selected.status !== 'pending' && <p className="handledBy">处理人：{selected.approver || '-'} · {selected.decision_reason || '无备注'}</p>}
+            {result && <div className="decisionResult">{result}</div>}
+          </div>
+        ) : <div className="noSelection"><ShieldAlert size={28} /><p>当前没有审批记录</p></div>}
+      </section>
+    </main>
+  );
+}
+
+function Root() {
+  return window.location.pathname.startsWith('/approval') ? <ApprovalApp /> : <QueryApp />;
+}
+
 function Stat({ icon, label, value, warn }) {
   return (
     <div className={`stat ${warn ? 'warn' : ''}`}>
@@ -285,4 +437,4 @@ function Gauge({ label, value }) {
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(<Root />);
