@@ -54,7 +54,3 @@ def manage_context_window(
         "older_message_count": len(older),
         "estimated_tokens": estimate_tokens(recent) + max(0, len(summary) // 3),
     }
-
-
-def split_context(history: list[dict[str, str]], existing_summary: str = "") -> dict[str, Any]:
-    return manage_context_window(history, existing_summary)

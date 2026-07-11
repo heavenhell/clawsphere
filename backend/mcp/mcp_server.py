@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
 
@@ -24,6 +25,7 @@ def _call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         caller_user_id=auth.user_id,
         caller_roles=auth.roles,
         tenant_id=auth.tenant_id,
+        task_id=str(uuid4()),
     ))
     return response.model_dump(mode="json")
 

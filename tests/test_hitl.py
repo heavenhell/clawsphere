@@ -1,9 +1,11 @@
 from uuid import uuid4
+from dataclasses import replace
 
 from backend.agent.copilot import resume_copilot, run_copilot
 from backend.guardrails.approvals import approval_store
 from backend.guardrails.policy import validate_tool_calls
 from backend.memory.database import memory_db
+from backend.mcp.tools import TOOL_REGISTRY
 from backend.mock.repository import repo
 
 
@@ -73,6 +75,29 @@ def test_missing_write_resource_requires_clarification():
     assert not result["tool_calls"]
     assert not result["approval"]
     assert "请指定" in result["answer"]
+
+
+def test_capacity_advice_is_not_treated_as_change_execution():
+    result = run_copilot("cluster-002 需要扩容吗？", ["readonly"])
+    assert result["intent"] == "capacity_forecast"
+    assert not result["approval"]
+    assert "预计" in result["answer"]
+
+
+def test_approval_uses_highest_proposed_tool_risk(monkeypatch):
+    original = TOOL_REGISTRY["restart_vm"]
+    monkeypatch.setitem(TOOL_REGISTRY, "restart_vm", replace(original, risk="medium"))
+    _clear_rate_events("dcs-app-01")
+    conversation_id = f"medium-risk-{uuid4()}"
+    paused = run_copilot(
+        "帮我重启 dcs-app-01，原因是中风险审批验证",
+        ["ops"],
+        conversation_id=conversation_id,
+        user_id="medium-risk-maker",
+    )
+    item = approval_store.get(paused["approval"]["approval_id"])
+    assert item["risk"] == "medium"
+    resume_copilot(conversation_id, False, "medium-risk-checker", "测试结束")
 
 
 def test_write_is_revalidated_after_approval_wait(monkeypatch):

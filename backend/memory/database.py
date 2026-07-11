@@ -4,9 +4,12 @@ import json
 import os
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+
+from backend.guardrails.permission import permissions_for_roles
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,10 +24,18 @@ class MemoryDatabase:
         self._lock = threading.RLock()
         self._init_schema()
 
-    def connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path, timeout=10)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def _init_schema(self) -> None:
         with self.connect() as connection:
@@ -65,6 +76,8 @@ class MemoryDatabase:
                 CREATE TABLE IF NOT EXISTS memory_writes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     task_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL,
                     summary TEXT NOT NULL,
                     execution_log_count INTEGER NOT NULL,
                     created_at TEXT NOT NULL
@@ -72,6 +85,8 @@ class MemoryDatabase:
                 CREATE TABLE IF NOT EXISTS execution_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     task_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL,
                     payload TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
@@ -126,6 +141,24 @@ class MemoryDatabase:
                     ON tool_rate_events(tool_name, resource_id, created_at);
                 """
             )
+            self._add_column_if_missing(connection, "memory_writes", "user_id", "TEXT NOT NULL DEFAULT 'legacy-user'")
+            self._add_column_if_missing(connection, "memory_writes", "tenant_id", "TEXT NOT NULL DEFAULT 'legacy-tenant'")
+            self._add_column_if_missing(connection, "execution_logs", "user_id", "TEXT NOT NULL DEFAULT 'legacy-user'")
+            self._add_column_if_missing(connection, "execution_logs", "tenant_id", "TEXT NOT NULL DEFAULT 'legacy-tenant'")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memory_writes_tenant ON memory_writes(tenant_id, created_at)"
+            )
+
+    @staticmethod
+    def _add_column_if_missing(
+        connection: sqlite3.Connection,
+        table: str,
+        column: str,
+        declaration: str,
+    ) -> None:
+        columns = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
     def upsert_knowledge(self, records: list[dict[str, Any]]) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -144,11 +177,7 @@ class MemoryDatabase:
             )
 
     def list_knowledge(self, roles: list[str], tenant_id: str = "global", tiers: tuple[int, ...] = (2, 3)) -> list[dict[str, Any]]:
-        permissions = ["public"]
-        if set(roles) & {"ops", "admin"}:
-            permissions.append("internal")
-        if "admin" in roles:
-            permissions.append("confidential")
+        permissions = permissions_for_roles(roles)
         permission_marks = ",".join("?" for _ in permissions)
         tier_marks = ",".join("?" for _ in tiers)
         query = f"""
@@ -160,11 +189,7 @@ class MemoryDatabase:
         return [dict(row) for row in rows]
 
     def get_knowledge(self, knowledge_id: str, roles: list[str], tenant_id: str = "global") -> dict[str, Any] | None:
-        permissions = ["public"]
-        if set(roles) & {"ops", "admin"}:
-            permissions.append("internal")
-        if "admin" in roles:
-            permissions.append("confidential")
+        permissions = permissions_for_roles(roles)
         marks = ",".join("?" for _ in permissions)
         with self.connect() as connection:
             row = connection.execute(
@@ -228,23 +253,46 @@ class MemoryDatabase:
         history = [{"role": row["role"], "content": row["content"]} for row in reversed(rows)]
         return history, session["summary"] if session else ""
 
-    def write_memory(self, task_id: str, summary: str, execution_log: list[dict[str, Any]]) -> dict[str, Any]:
+    def write_memory(
+        self,
+        task_id: str,
+        user_id: str,
+        tenant_id: str,
+        summary: str,
+        execution_log: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock, self.connect() as connection:
             cursor = connection.execute(
-                "INSERT INTO memory_writes(task_id, summary, execution_log_count, created_at) VALUES (?, ?, ?, ?)",
-                (task_id, summary, len(execution_log), now),
+                """
+                INSERT INTO memory_writes(task_id, user_id, tenant_id, summary, execution_log_count, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (task_id, user_id, tenant_id, summary, len(execution_log), now),
             )
             for item in execution_log:
                 connection.execute(
-                    "INSERT INTO execution_logs(task_id, payload, created_at) VALUES (?, ?, ?)",
-                    (task_id, json.dumps(item, ensure_ascii=False), now),
+                    """
+                    INSERT INTO execution_logs(task_id, user_id, tenant_id, payload, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (task_id, user_id, tenant_id, json.dumps(item, ensure_ascii=False), now),
                 )
-        return {"id": f"memory-{cursor.lastrowid:04d}", "task_id": task_id, "summary": summary, "created_at": now}
+        return {
+            "id": f"memory-{cursor.lastrowid:04d}",
+            "task_id": task_id,
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+            "summary": summary,
+            "created_at": now,
+        }
 
-    def list_memory_writes(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_memory_writes(self, tenant_id: str, limit: int = 50) -> list[dict[str, Any]]:
         with self.connect() as connection:
-            rows = connection.execute("SELECT * FROM memory_writes ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+            rows = connection.execute(
+                "SELECT * FROM memory_writes WHERE tenant_id = ? ORDER BY id DESC LIMIT ?",
+                (tenant_id, limit),
+            ).fetchall()
         return [dict(row) for row in reversed(rows)]
 
     def append_tool_audit(self, record: dict[str, Any]) -> None:
@@ -280,18 +328,6 @@ class MemoryDatabase:
             item["success"] = bool(item["success"])
             items.append(item)
         return items
-
-    def count_tool_calls_since(self, tool_name: str, resource_id: str, since: str) -> int:
-        with self.connect() as connection:
-            row = connection.execute(
-                """
-                SELECT COUNT(*) AS count FROM tool_audit
-                WHERE tool_name = ? AND success = 1 AND created_at >= ?
-                  AND (json_extract(params, '$.vm_id') = ? OR json_extract(params, '$.cluster_id') = ?)
-                """,
-                (tool_name, since, resource_id, resource_id),
-            ).fetchone()
-        return int(row["count"])
 
     def append_mock_change(self, task_id: str, action: str, resource_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()

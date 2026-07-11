@@ -19,6 +19,7 @@ from backend.memory.context_manager import deterministic_summary, manage_context
 from backend.memory.database import memory_db
 from backend.memory.retriever import retrieve, retrieve_history, retrieve_skill_detail
 from backend.memory.store import write_conversation_summary
+from backend.mock.repository import repo
 from backend.skills.loader import startup_skill_summaries
 from backend.observability import observe_agent
 
@@ -99,7 +100,7 @@ def extract_alarm_id(message: str, history: list[dict[str, str]] | None = None) 
     ordinal_map = {"第一条": 0, "第1条": 0, "第二条": 1, "第2条": 1, "第三条": 2, "第3条": 2}
     for keyword, index in ordinal_map.items():
         if keyword in message:
-            alarms = call_tool(ToolRequest(tool_name="list_alarms", params={})).data or []
+            alarms = [alarm for alarm in repo.alarms() if alarm.get("status") == "active"]
             if index < len(alarms):
                 return alarms[index]["id"]
     if _contains(message, ["它呢", "这条", "那条", "这个", "那个"]):
@@ -169,7 +170,7 @@ def plan_tools(intent: str, message: str, history: list[dict[str, str]]) -> list
             if not cluster_id:
                 return []
             count = re.search(r"(?:到|至|为)\s*(\d+)\s*台", message)
-            current = next((cluster["host_count"] for cluster in call_tool(ToolRequest(tool_name="list_clusters", params={})).data if cluster["id"] == cluster_id), 1)
+            current = next((cluster["host_count"] for cluster in repo.clusters() if cluster["id"] == cluster_id), 1)
             target_hosts = int(count.group(1)) if count else current + 1
             return [{"tool_name": "scale_cluster", "params": {"cluster_id": cluster_id, "target_hosts": target_hosts, "reason": message}}]
         if "HA" in message.upper() or "策略" in message:
@@ -290,6 +291,12 @@ def guardrail(state: CopilotState) -> CopilotState:
 def hitl_interrupt(state: CopilotState) -> CopilotState:
     # LangGraph reruns this node from the top after resume. Keep every operation
     # before interrupt() idempotent; create_or_get is keyed by task_id for that reason.
+    risk_order = {"none": 0, "low": 1, "medium": 2, "high": 3}
+    approval_risk = max(
+        (risk_for_tool(call["tool_name"]) for call in state.get("tool_calls_proposed", [])),
+        key=lambda risk: risk_order.get(risk, 0),
+        default="medium",
+    )
     item = approval_store.create_or_get(
         state["task_id"],
         state["conversation_id"],
@@ -297,7 +304,7 @@ def hitl_interrupt(state: CopilotState) -> CopilotState:
         state["tenant_id"],
         state["message"],
         state.get("tool_calls_proposed", []),
-        "high",
+        approval_risk,
     )
     decision = interrupt({
         "approval_id": item["id"],
@@ -352,87 +359,107 @@ def _tool_data(state: CopilotState) -> dict[str, Any]:
     return {item["tool_name"]: item.get("data") for item in state.get("tool_results", []) if item.get("success")}
 
 
+def _respond_alert(state: CopilotState, data: dict[str, Any]) -> str:
+    message = state["message"]
+    asks_list = _contains(message, ["哪些", "列表", "多少", "当前", "现在", "所有"])
+    alarm_id = extract_alarm_id(message, state.get("recent_messages", []))
+    if not asks_list and not alarm_id:
+        return "请告诉我要解释的告警编号，例如 alarm-9001；也可以先问“现在有哪些告警”。"
+    alarms = data.get("list_alarms") or []
+    if asks_list and not alarm_id:
+        alarm_lines = "\n".join(f"- {a['id']}：{a['name']}，级别 {a['severity']}，对象 {a['object_type']} / {a['object_id']}，状态 {a['status']}" for a in alarms)
+        return f"当前共有 {len(alarms)} 条活动告警。\n\n{alarm_lines}\n\n你可以继续问：第一条告警的原因？第二条呢？"
+    detail = data.get("get_alarm_detail") or {}
+    alarm = detail.get("alarm", {})
+    related = detail.get("related", {})
+    if alarm.get("object_type") == "host":
+        host = related.get("host") or {}
+        return f"结论：{alarm.get('id')} 的主要风险是 {alarm.get('name')}。\n\n证据：关联主机 {host.get('name')} 状态 {host.get('status')}，CPU {int(host.get('cpu_usage', 0) * 100)}%，内存 {int(host.get('memory_usage', 0) * 100)}%。\n\n建议动作：检查同主机 VM 和近期任务峰值，必要时迁移部分 VM 或规划扩容。\n\n风险提示：不要直接重启主机，先确认业务窗口和 HA 策略。"
+    ds = related.get("datastore") or {}
+    return f"结论：{alarm.get('id')} 的主要风险是 {alarm.get('name')}。\n\n证据：关联数据存储 {ds.get('name')} 剩余 {ds.get('free_gb')}GB / 总量 {ds.get('capacity_gb')}GB。\n\n建议动作：先清理过期快照和低价值镜像，确认增长最快的 VM；如无法释放空间，准备扩容或迁移计划。\n\n风险提示：不要直接删除未知磁盘或快照，先确认业务归属和备份状态。"
+
+
+def _respond_capacity(state: CopilotState, data: dict[str, Any]) -> str:
+    if not extract_cluster_id(state["message"]):
+        return "请指定要预测的集群，例如 cluster-001 或 cluster-002。"
+    forecast = data.get("run_capacity_forecast") or {}
+    return f"结论：{forecast.get('cluster_id')} 容量风险为 {forecast.get('risk_level')}。\n\n证据：日增长约 {forecast.get('daily_growth_gb')}GB，预计 {forecast.get('days_to_exhaustion')} 天后耗尽。\n\n建议动作：{forecast.get('recommendation')}"
+
+
+def _respond_vm(state: CopilotState, data: dict[str, Any]) -> str:
+    vm_id = extract_vm_id(state["message"])
+    if not vm_id:
+        return "请指定要诊断的虚拟机 ID 或名称，例如 vm-1001 或 dcs-app-01。"
+    failed = [item for item in state.get("tool_results", []) if not item.get("success")]
+    if failed or not data.get("get_vm_detail"):
+        return f"未找到虚拟机 {vm_id}，因此没有生成性能结论。请确认 VM ID 或名称后重试。"
+    metrics = (data.get("get_vm_metrics") or {}).get("series", [])
+    warnings = [metric for metric in metrics if metric.get("status") == "warning"]
+    warning_text = "；".join(f"{metric['metric']}={metric['value']}{metric['unit']}" for metric in warnings) or "未发现明显异常"
+    return f"结论：该 VM 的性能问题优先排查 CPU ready、CPU usage 和存储延迟。\n\n证据：{warning_text}。\n\n建议动作：先确认所在主机是否过载，再检查同主机 VM 的 CPU 争用；若磁盘延迟持续高于 20ms，继续排查数据存储。"
+
+
+def _respond_resource(state: CopilotState, data: dict[str, Any]) -> str:
+    message = state["message"]
+    resource = data.get("get_resource_overview") or {}
+    overview = resource.get("overview", {})
+    if _contains(message, ["虚拟机", "云服务器", "VM", "vm"]):
+        vms = resource.get("vms", [])
+        lines = "\n".join(f"- {vm['name']}：{vm['status']}，{vm['cpu']} vCPU，{vm['memory_mb']}MB，IP {vm['ip']}，所在主机 {vm['host_id']}" for vm in vms)
+        return f"当前共有 {len(vms)} 台虚拟机。\n\n{lines}"
+    if "主机" in message:
+        hosts = resource.get("hosts", [])
+        lines = "\n".join(f"- {host['name']}：{host['status']}，管理 IP {host['management_ip']}，CPU {int(host['cpu_usage'] * 100)}%，内存 {int(host['memory_usage'] * 100)}%" for host in hosts)
+        return f"当前共有 {len(hosts)} 台主机。\n\n{lines}"
+    if "集群" in message:
+        clusters = resource.get("clusters", [])
+        lines = "\n".join(f"- {cluster['name']}：{cluster['status']}，主机 {cluster['host_count']} 台，VM {cluster['vm_count']} 台" for cluster in clusters)
+        return f"当前共有 {len(clusters)} 个集群。\n\n{lines}"
+    if _contains(message, ["存储", "数据存储"]):
+        datastores = resource.get("datastores", [])
+        lines = "\n".join(f"- {datastore['name']}：{datastore['status']}，剩余 {datastore['free_gb']}GB / 总量 {datastore['capacity_gb']}GB" for datastore in datastores)
+        return f"当前共有 {len(datastores)} 个数据存储。\n\n{lines}"
+    return f"资源盘点：站点 {len(resource.get('sites', []))} 个，集群 {overview.get('cluster_count')} 个，主机 {overview.get('host_count')} 台，VM {overview.get('vm_count')} 台，数据存储 {overview.get('datastore_count')} 个，活跃告警 {overview.get('active_alarm_count')} 条。"
+
+
+def _respond_change(state: CopilotState, _data: dict[str, Any]) -> str:
+    message = state["message"]
+    if not state.get("tool_calls_proposed"):
+        if "重启" in message:
+            return "请指定要重启的虚拟机 ID 或名称，确认对象后我再生成审批。"
+        if _contains(message, ["扩容", "扩缩容", "HA", "策略"]):
+            return "请指定要变更的集群 ID，例如 cluster-002，确认对象后我再生成审批。"
+        if _contains(message, ["删除", "销毁", "清空"]):
+            return "请求被护栏拦截：当前系统不支持删除或销毁资源。"
+        return "请补充明确的变更对象和动作，我不会猜测资源后发起执行。"
+    completed = [item for item in state.get("tool_results", []) if item.get("success")]
+    if completed:
+        result = completed[-1].get("data") or {}
+        return f"变更已获批准并执行完成。任务 {result.get('task_id')}，动作 {result.get('action')}，对象 {result.get('resource_name') or result.get('resource_id')}，状态 {result.get('status')}。"
+    return "该请求涉及写操作，已按护栏要求进入审批流程，审批前不会执行变更。"
+
+
 def deterministic_response(state: CopilotState) -> str:
     intent = state["intent"]
-    message = state["message"]
     if state.get("error"):
         if intent == "vm_diagnosis" and "虚拟机不存在" in state["error"]:
-            vm_id = extract_vm_id(message)
+            vm_id = extract_vm_id(state["message"])
             return f"未找到虚拟机 {vm_id}，因此没有生成性能结论。请确认 VM ID 或名称后重试。"
         return f"请求被护栏拦截：{state['error']}"
     if state.get("final_response"):
         return state["final_response"]
     if intent == "smalltalk":
         return "你好，我在。你可以自然地问我资源、告警、容量、VM 性能，也可以继续追问上一轮结果。"
-    data = _tool_data(state)
-    if intent == "alert_explain":
-        asks_list = _contains(message, ["哪些", "列表", "多少", "当前", "现在", "所有"])
-        if not asks_list and not extract_alarm_id(message, state.get("recent_messages", [])):
-            return "请告诉我要解释的告警编号，例如 alarm-9001；也可以先问“现在有哪些告警”。"
-        alarms = data.get("list_alarms") or []
-        asks_list = asks_list and not extract_alarm_id(message, state.get("recent_messages", []))
-        if asks_list:
-            alarm_lines = "\n".join(f"- {a['id']}：{a['name']}，级别 {a['severity']}，对象 {a['object_type']} / {a['object_id']}，状态 {a['status']}" for a in alarms)
-            return f"当前共有 {len(alarms)} 条活动告警。\n\n{alarm_lines}\n\n你可以继续问：第一条告警的原因？第二条呢？"
-        detail = data.get("get_alarm_detail") or {}
-        alarm = detail.get("alarm", {})
-        related = detail.get("related", {})
-        if alarm.get("object_type") == "host":
-            host = related.get("host") or {}
-            return f"结论：{alarm.get('id')} 的主要风险是 {alarm.get('name')}。\n\n证据：关联主机 {host.get('name')} 状态 {host.get('status')}，CPU {int(host.get('cpu_usage', 0) * 100)}%，内存 {int(host.get('memory_usage', 0) * 100)}%。\n\n建议动作：检查同主机 VM 和近期任务峰值，必要时迁移部分 VM 或规划扩容。\n\n风险提示：不要直接重启主机，先确认业务窗口和 HA 策略。"
-        ds = related.get("datastore") or {}
-        return f"结论：{alarm.get('id')} 的主要风险是 {alarm.get('name')}。\n\n证据：关联数据存储 {ds.get('name')} 剩余 {ds.get('free_gb')}GB / 总量 {ds.get('capacity_gb')}GB。\n\n建议动作：先清理过期快照和低价值镜像，确认增长最快的 VM；如无法释放空间，准备扩容或迁移计划。\n\n风险提示：不要直接删除未知磁盘或快照，先确认业务归属和备份状态。"
-    if intent == "capacity_forecast":
-        if not extract_cluster_id(message):
-            return "请指定要预测的集群，例如 cluster-001 或 cluster-002。"
-        forecast = data.get("run_capacity_forecast") or {}
-        return f"结论：{forecast.get('cluster_id')} 容量风险为 {forecast.get('risk_level')}。\n\n证据：日增长约 {forecast.get('daily_growth_gb')}GB，预计 {forecast.get('days_to_exhaustion')} 天后耗尽。\n\n建议动作：{forecast.get('recommendation')}"
-    if intent == "vm_diagnosis":
-        if not extract_vm_id(message):
-            return "请指定要诊断的虚拟机 ID 或名称，例如 vm-1001 或 dcs-app-01。"
-        failed = [item for item in state.get("tool_results", []) if not item.get("success")]
-        detail = data.get("get_vm_detail")
-        if failed or not detail:
-            vm_id = extract_vm_id(message)
-            return f"未找到虚拟机 {vm_id}，因此没有生成性能结论。请确认 VM ID 或名称后重试。"
-        metrics = (data.get("get_vm_metrics") or {}).get("series", [])
-        warnings = [m for m in metrics if m.get("status") == "warning"]
-        warning_text = "；".join(f"{m['metric']}={m['value']}{m['unit']}" for m in warnings) or "未发现明显异常"
-        return f"结论：该 VM 的性能问题优先排查 CPU ready、CPU usage 和存储延迟。\n\n证据：{warning_text}。\n\n建议动作：先确认所在主机是否过载，再检查同主机 VM 的 CPU 争用；若磁盘延迟持续高于 20ms，继续排查数据存储。"
-    if intent == "resource_query":
-        resource = data.get("get_resource_overview") or {}
-        overview = resource.get("overview", {})
-        vms = resource.get("vms", [])
-        hosts = resource.get("hosts", [])
-        clusters = resource.get("clusters", [])
-        datastores = resource.get("datastores", [])
-        if _contains(message, ["虚拟机", "云服务器", "VM", "vm"]):
-            lines = "\n".join(f"- {vm['name']}：{vm['status']}，{vm['cpu']} vCPU，{vm['memory_mb']}MB，IP {vm['ip']}，所在主机 {vm['host_id']}" for vm in vms)
-            return f"当前共有 {len(vms)} 台虚拟机。\n\n{lines}"
-        if "主机" in message:
-            lines = "\n".join(f"- {h['name']}：{h['status']}，管理 IP {h['management_ip']}，CPU {int(h['cpu_usage'] * 100)}%，内存 {int(h['memory_usage'] * 100)}%" for h in hosts)
-            return f"当前共有 {len(hosts)} 台主机。\n\n{lines}"
-        if "集群" in message:
-            lines = "\n".join(f"- {c['name']}：{c['status']}，主机 {c['host_count']} 台，VM {c['vm_count']} 台" for c in clusters)
-            return f"当前共有 {len(clusters)} 个集群。\n\n{lines}"
-        if _contains(message, ["存储", "数据存储"]):
-            lines = "\n".join(f"- {d['name']}：{d['status']}，剩余 {d['free_gb']}GB / 总量 {d['capacity_gb']}GB" for d in datastores)
-            return f"当前共有 {len(datastores)} 个数据存储。\n\n{lines}"
-        return f"资源盘点：站点 {len(resource.get('sites', []))} 个，集群 {overview.get('cluster_count')} 个，主机 {overview.get('host_count')} 台，VM {overview.get('vm_count')} 台，数据存储 {overview.get('datastore_count')} 个，活跃告警 {overview.get('active_alarm_count')} 条。"
-    if intent == "change_execute":
-        if not state.get("tool_calls_proposed"):
-            if "重启" in message:
-                return "请指定要重启的虚拟机 ID 或名称，确认对象后我再生成审批。"
-            if _contains(message, ["扩容", "扩缩容", "HA", "策略"]):
-                return "请指定要变更的集群 ID，例如 cluster-002，确认对象后我再生成审批。"
-            if _contains(message, ["删除", "销毁", "清空"]):
-                return "请求被护栏拦截：当前系统不支持删除或销毁资源。"
-            return "请补充明确的变更对象和动作，我不会猜测资源后发起执行。"
-        completed = [item for item in state.get("tool_results", []) if item.get("success")]
-        if completed:
-            result = completed[-1].get("data") or {}
-            return f"变更已获批准并执行完成。任务 {result.get('task_id')}，动作 {result.get('action')}，对象 {result.get('resource_name') or result.get('resource_id')}，状态 {result.get('status')}。"
-        return "该请求涉及写操作，已按护栏要求进入审批流程，审批前不会执行变更。"
+    handlers = {
+        "alert_explain": _respond_alert,
+        "capacity_forecast": _respond_capacity,
+        "vm_diagnosis": _respond_vm,
+        "resource_query": _respond_resource,
+        "change_execute": _respond_change,
+    }
+    handler = handlers.get(intent)
+    if handler:
+        return handler(state, _tool_data(state))
     return "我在。你可以问资源、告警、容量预测、VM 性能诊断，也可以继续追问上一轮结果。"
 
 
@@ -472,7 +499,13 @@ def response_generator(state: CopilotState) -> CopilotState:
 
 def memory_writer(state: CopilotState) -> CopilotState:
     turn_summary = f"intent={state.get('intent')}; message={state.get('message')[:120]}; tools={[r.get('tool_name') for r in state.get('tool_results', [])]}"
-    write_conversation_summary(state["task_id"], turn_summary, state.get("execution_log", []))
+    write_conversation_summary(
+        state["task_id"],
+        state["user_id"],
+        state["tenant_id"],
+        turn_summary,
+        state.get("execution_log", []),
+    )
     memory_db.append_turn(
         state["conversation_id"],
         state["user_id"],
@@ -584,11 +617,9 @@ def run_copilot(
     tenant_id: str = "demo-tenant",
 ) -> dict[str, Any]:
     conversation_id = conversation_id or f"conversation-{uuid4()}"
-    messages = history or []
-    if not messages:
-        stored_messages, stored_summary = memory_db.load_conversation(conversation_id, user_id, tenant_id)
-        messages = stored_messages
-        summary = summary or stored_summary
+    stored_messages, stored_summary = memory_db.load_conversation(conversation_id, user_id, tenant_id)
+    messages = stored_messages or history or []
+    summary = stored_summary or summary
     task_id = str(uuid4())
     config = {"configurable": {"thread_id": conversation_id}}
     state = get_graph().invoke({

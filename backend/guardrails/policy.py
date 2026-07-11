@@ -12,12 +12,15 @@ from backend.mock.repository import repo
 
 WRITE_HINTS = ["重启", "停止", "删除", "迁移", "扩容", "修改", "启用", "禁用", "执行", "处理掉"]
 READ_ONLY_HINTS = ["时间", "记录", "历史", "状态", "是否", "谁", "什么", "查看", "查询"]
-COMMAND_HINTS = ["帮我", "请", "立即", "直接", "执行", "把", "将", "处理掉"]
+COMMAND_HINTS = ["立即", "直接执行", "现在执行", "执行变更", "处理掉", "改为", "设置为"]
+ADVISORY_HINTS = ["是否需要", "需不需要", "要不要", "该不该", "建议", "评估", "需要扩容吗", "扩容吗"]
 
 
 def detect_write_intent(message: str) -> bool:
     """Early intent hint only; authorization is always decided from ToolSpec."""
     if not any(word in message for word in WRITE_HINTS):
+        return False
+    if any(word in message for word in ADVISORY_HINTS) and not any(word in message for word in COMMAND_HINTS):
         return False
     if any(word in message for word in READ_ONLY_HINTS) and not any(word in message for word in COMMAND_HINTS):
         return False

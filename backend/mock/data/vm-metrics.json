@@ -1,0 +1,15 @@
+{
+  "defaults": {
+    "cpu.usage": 42,
+    "cpu.ready": 1.1,
+    "mem.usage": 72,
+    "mem.balloon": 0,
+    "disk.latency": 9,
+    "net.drop": 0.2
+  },
+  "overrides": {
+    "vm-1001": {"cpu.usage": 86, "cpu.ready": 6.8},
+    "vm-1042": {"mem.balloon": 640, "disk.latency": 24},
+    "vm-1024": {"disk.latency": 24}
+  }
+}

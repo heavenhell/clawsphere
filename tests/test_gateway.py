@@ -9,6 +9,17 @@ from backend.memory.database import memory_db
 client = TestClient(app)
 
 
+def _tool_request(tool_name: str, params: dict, task_id: str = "gateway-test") -> ToolRequest:
+    return ToolRequest(
+        tool_name=tool_name,
+        params=params,
+        caller_user_id="gateway-test-user",
+        caller_roles=["readonly"],
+        task_id=task_id,
+        tenant_id="gateway-test-tenant",
+    )
+
+
 def test_mock_scenario_has_normal_and_abnormal_resources():
     assert len(client.get("/mock/fusioncompute/vms").json()) == 5
     assert len(client.get("/mock/fusioncompute/alarms").json()) == 5
@@ -16,9 +27,9 @@ def test_mock_scenario_has_normal_and_abnormal_resources():
 
 
 def test_tool_schema_rejects_invalid_parameters():
-    response = call_tool(ToolRequest(
-        tool_name="run_capacity_forecast",
-        params={"cluster_id": "not-a-cluster", "forecast_days": 999},
+    response = call_tool(_tool_request(
+        "run_capacity_forecast",
+        {"cluster_id": "not-a-cluster", "forecast_days": 999},
     ))
     assert not response.success
     assert response.error_code == "SCHEMA_VALIDATION_FAILED"
@@ -47,7 +58,7 @@ def test_tool_catalog_exposes_json_schema():
 
 
 def test_tool_audit_is_persisted():
-    response = call_tool(ToolRequest(tool_name="list_alarms", params={}, task_id="audit-test"))
+    response = call_tool(_tool_request("list_alarms", {}, "audit-test"))
     records = memory_db.list_tool_audit(20)
     assert any(item["audit_id"] == response.audit_id and item["task_id"] == "audit-test" for item in records)
 

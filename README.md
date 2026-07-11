@@ -53,6 +53,7 @@ pip install -r requirements-observability.txt
 - `DEEPSEEK_API_KEY`：启用 LLM intent、structured planner、摘要和回答生成。
 - `DCS_MEMORY_BACKEND=postgres`：Skill 存储切换到 PostgreSQL/pgvector。
 - `DCS_CHECKPOINT_BACKEND=postgres`：LangGraph checkpoint 切换到 PostgresSaver。
+- `DCS_CORS_ORIGINS`：逗号分隔的前端允许来源；生产环境应设置为实际部署域名。
 - `MCP_AUTH_TOKEN`：生产 MCP Server 的调用身份；Demo 可使用 `MCP_CALLER_*` 环境变量。
 
 生产环境应由外部 IdP 签发身份令牌，并将 `DEMO_MODE` 设为 `false`。
@@ -105,6 +106,7 @@ python -m backend.mcp.mcp_server
 | `GET /api/approvals` | 当前租户审批列表 |
 | `POST /api/approvals/{id}/decision` | maker-checker 审批与断点恢复 |
 | `GET /api/audit` | 当前租户工具审计 |
+| `GET /api/memory` | 当前租户 Agent memory 写入摘要 |
 | `GET /metrics/` | Prometheus 指标 |
 
 ## Retrieval

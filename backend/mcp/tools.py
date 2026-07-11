@@ -243,57 +243,54 @@ def call_tool(request: ToolRequest) -> ToolResponse:
     started = perf_counter()
     audit_id = str(uuid4())
     spec = TOOL_REGISTRY.get(request.tool_name)
-    if not spec:
+
+    def response(
+        success: bool,
+        *,
+        data: Any | None = None,
+        error_code: str | None = None,
+        error_msg: str | None = None,
+    ) -> ToolResponse:
         return ToolResponse(
             tool_name=request.tool_name,
-            success=False,
-            error_code="TOOL_NOT_FOUND",
-            error_msg="工具不存在",
-            execution_time_ms=0,
-            audit_id=audit_id,
-        )
-    if not has_allowed_role(request.caller_roles, spec.auth_roles):
-        response = ToolResponse(
-            tool_name=request.tool_name,
-            success=False,
-            error_code="PERMISSION_DENIED",
-            error_msg="当前角色无权调用该工具",
+            success=success,
+            data=data,
+            error_code=error_code,
+            error_msg=error_msg,
             execution_time_ms=int((perf_counter() - started) * 1000),
             audit_id=audit_id,
         )
-    elif spec.risk in {"medium", "high"}:
-        approval = approval_store.get_by_task(request.task_id)
-        if not approval or approval["status"] != "approved" or approval["tenant_id"] != request.tenant_id:
-            response = ToolResponse(
-                tool_name=request.tool_name,
-                success=False,
-                error_code="APPROVAL_REQUIRED",
-                error_msg="高风险工具必须关联已批准的审批任务",
-                execution_time_ms=int((perf_counter() - started) * 1000),
-                audit_id=audit_id,
-            )
-        else:
-            try:
-                params = spec.input_model.model_validate(request.params).model_dump(exclude_none=True)
-                data = spec.fn(**params)
-                response = ToolResponse(
-                    tool_name=request.tool_name, success=True, data=data,
-                    execution_time_ms=int((perf_counter() - started) * 1000), audit_id=audit_id,
-                )
-            except (TypeError, ValidationError) as exc:
-                response = ToolResponse(
-                    tool_name=request.tool_name, success=False, error_code="SCHEMA_VALIDATION_FAILED",
-                    error_msg=str(exc), execution_time_ms=int((perf_counter() - started) * 1000), audit_id=audit_id,
-                )
-            except ValueError as exc:
-                response = ToolResponse(
-                    tool_name=request.tool_name, success=False, error_code="BUSINESS_VALIDATION_FAILED",
-                    error_msg=str(exc), execution_time_ms=int((perf_counter() - started) * 1000), audit_id=audit_id,
-                )
+
+    if not spec:
+        tool_response = response(False, error_code="TOOL_NOT_FOUND", error_msg="工具不存在")
+        risk_level = "unknown"
+    elif not has_allowed_role(request.caller_roles, spec.auth_roles):
+        tool_response = response(False, error_code="PERMISSION_DENIED", error_msg="当前角色无权调用该工具")
+        risk_level = spec.risk
     else:
+        risk_level = spec.risk
         try:
             params = spec.input_model.model_validate(request.params).model_dump(exclude_none=True)
-            if request.tool_name == "create_approval_request":
+            if spec.risk in {"medium", "high"}:
+                approval = approval_store.get_by_task(request.task_id)
+                matching_call = approval and any(
+                    call.get("tool_name") == request.tool_name and call.get("params") == params
+                    for call in approval.get("tool_calls", [])
+                )
+                if not (
+                    approval
+                    and approval["status"] == "approved"
+                    and approval["tenant_id"] == request.tenant_id
+                    and matching_call
+                ):
+                    tool_response = response(
+                        False,
+                        error_code="APPROVAL_REQUIRED",
+                        error_msg="高风险工具必须匹配已批准的工具和参数",
+                    )
+                else:
+                    tool_response = response(True, data=spec.fn(**params))
+            elif request.tool_name == "create_approval_request":
                 data = approval_store.create_or_get(
                     request.task_id,
                     request.task_id,
@@ -303,52 +300,33 @@ def call_tool(request: ToolRequest) -> ToolResponse:
                     [],
                     params["risk"],
                 )
+                tool_response = response(True, data=data)
             else:
-                data = spec.fn(**params)
-            response = ToolResponse(
-                tool_name=request.tool_name,
-                success=True,
-                data=data,
-                execution_time_ms=int((perf_counter() - started) * 1000),
-                audit_id=audit_id,
-            )
+                tool_response = response(True, data=spec.fn(**params))
         except (TypeError, ValidationError) as exc:
-            response = ToolResponse(
-                tool_name=request.tool_name,
-                success=False,
-                error_code="SCHEMA_VALIDATION_FAILED",
-                error_msg=str(exc),
-                execution_time_ms=int((perf_counter() - started) * 1000),
-                audit_id=audit_id,
-            )
+            tool_response = response(False, error_code="SCHEMA_VALIDATION_FAILED", error_msg=str(exc))
         except ValueError as exc:
-            response = ToolResponse(
-                tool_name=request.tool_name,
-                success=False,
-                error_code="BUSINESS_VALIDATION_FAILED",
-                error_msg=str(exc),
-                execution_time_ms=int((perf_counter() - started) * 1000),
-                audit_id=audit_id,
-            )
+            tool_response = response(False, error_code="BUSINESS_VALIDATION_FAILED", error_msg=str(exc))
+
     audit_record = {
-            "audit_id": audit_id,
-            "task_id": request.task_id,
-            "user_id": request.caller_user_id,
-            "tenant_id": request.tenant_id,
-            "tool_name": request.tool_name,
-            "params": request.params,
-            "roles": request.caller_roles,
-            "success": response.success,
-            "error_code": response.error_code,
-            "risk_level": spec.risk,
-            "duration_ms": response.execution_time_ms,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        "audit_id": audit_id,
+        "task_id": request.task_id,
+        "user_id": request.caller_user_id,
+        "tenant_id": request.tenant_id,
+        "tool_name": request.tool_name,
+        "params": request.params,
+        "roles": request.caller_roles,
+        "success": tool_response.success,
+        "error_code": tool_response.error_code,
+        "risk_level": risk_level,
+        "duration_ms": tool_response.execution_time_ms,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
     memory_db.append_tool_audit(audit_record)
-    if response.success and request.tool_name in {"restart_vm", "scale_cluster", "modify_ha_policy"}:
-        payload = response.data if isinstance(response.data, dict) else {"result": response.data}
+    if tool_response.success and request.tool_name in {"restart_vm", "scale_cluster", "modify_ha_policy"}:
+        payload = tool_response.data if isinstance(tool_response.data, dict) else {"result": tool_response.data}
         resource_id = request.params.get("vm_id") or request.params.get("cluster_id") or "unknown"
         memory_db.append_mock_change(request.task_id, request.tool_name, resource_id, payload)
-    TOOL_CALLS.labels(request.tool_name, str(response.success).lower()).inc()
-    TOOL_LATENCY.labels(request.tool_name).observe(response.execution_time_ms / 1000)
-    return response
+    TOOL_CALLS.labels(request.tool_name, str(tool_response.success).lower()).inc()
+    TOOL_LATENCY.labels(request.tool_name).observe(tool_response.execution_time_ms / 1000)
+    return tool_response

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from time import perf_counter
 
 from backend.agent.copilot import close_graph_runtime, get_graph, resume_copilot, run_copilot
@@ -12,7 +13,7 @@ from backend.guardrails.approvals import approval_store
 from backend.mcp.auth import DEMO_MODE, AuthContext, get_auth_context, issue_demo_token
 from backend.memory.store import list_memory_writes
 from backend.memory.database import memory_db
-from backend.mcp.schemas import ToolRequest
+from backend.mcp.schemas import GatewayToolRequest, ToolRequest
 from backend.mcp.tools import TOOL_REGISTRY, call_tool
 from backend.mock.repository import repo
 from backend.mock.api import router as mock_router
@@ -21,9 +22,9 @@ from backend.memory.retriever import ensure_knowledge_seeded
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     message: str
-    history: list[dict[str, str]] = Field(default_factory=list)
-    summary: str = ""
     conversation_id: str | None = None
 
 
@@ -48,9 +49,17 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="DCS Copilot Demo", lifespan=lifespan)
 
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "DCS_CORS_ORIGINS",
+        "http://127.0.0.1:5174,http://localhost:5174",
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5174", "http://localhost:5174"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -108,26 +117,26 @@ def demo_token(request: DemoTokenRequest):
 
 
 @app.post("/api/tools/call")
-def tool_call(request: ToolRequest, auth: AuthContext = Depends(get_auth_context)):
-    secured = request.model_copy(update={
-        "caller_user_id": auth.user_id,
-        "caller_roles": auth.roles,
-        "tenant_id": auth.tenant_id,
-    })
-    return call_tool(secured)
+def tool_call(request: GatewayToolRequest, auth: AuthContext = Depends(get_auth_context)):
+    return call_tool(ToolRequest(
+        tool_name=request.tool_name,
+        params=request.params,
+        task_id=request.task_id,
+        caller_user_id=auth.user_id,
+        caller_roles=auth.roles,
+        tenant_id=auth.tenant_id,
+    ))
 
 
 @app.post("/api/chat")
 def chat(request: ChatRequest, auth: AuthContext = Depends(get_auth_context)):
     try:
         result = run_copilot(
-            request.message,
-            auth.roles,
-            request.history,
-            request.summary,
-            request.conversation_id,
-            auth.user_id,
-            auth.tenant_id,
+            message=request.message,
+            roles=auth.roles,
+            conversation_id=request.conversation_id,
+            user_id=auth.user_id,
+            tenant_id=auth.tenant_id,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail="会话不属于当前用户或租户") from exc
@@ -164,26 +173,31 @@ def decide_approval(
         raise HTTPException(status_code=403, detail="发起人不能审批自己的变更")
     if approval["risk"] == "high" and "admin" not in auth.roles:
         raise HTTPException(status_code=403, detail="高风险变更必须由 admin 审批")
-    APPROVAL_DECISIONS.labels("approved" if request.approved else "rejected").inc()
     if not approval["tool_calls"]:
         try:
             decided = approval_store.decide(approval_id, request.approved, auth.user_id, request.reason)
-        except (PermissionError, ValueError) as exc:
+        except (KeyError, PermissionError, RuntimeError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        APPROVAL_DECISIONS.labels("approved" if request.approved else "rejected").inc()
         return {
             "conversation_id": approval["conversation_id"],
             "answer": f"审批 {approval_id} 已{'批准' if request.approved else '拒绝'}。",
             "approval": decided,
             "tool_results": [],
         }
-    return resume_copilot(
-        approval["conversation_id"],
-        request.approved,
-        auth.user_id,
-        request.reason,
-    )
+    try:
+        result = resume_copilot(
+            approval["conversation_id"],
+            request.approved,
+            auth.user_id,
+            request.reason,
+        )
+    except (KeyError, PermissionError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    APPROVAL_DECISIONS.labels("approved" if request.approved else "rejected").inc()
+    return result
 
 
 @app.get("/api/memory")
-def memory():
-    return list_memory_writes(50)
+def memory(auth: AuthContext = Depends(get_auth_context)):
+    return list_memory_writes(auth.tenant_id, 50)

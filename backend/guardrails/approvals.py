@@ -51,6 +51,7 @@ class ApprovalStore:
 
     def decide(self, approval_id: str, approved: bool, approver: str, reason: str = "") -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
+        task_id = ""
         with memory_db.connect() as connection:
             current = connection.execute("SELECT status, user_id, task_id FROM approvals WHERE id = ?", (approval_id,)).fetchone()
             if not current:
@@ -68,11 +69,9 @@ class ApprovalStore:
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("approval decision race detected")
-            if not approved:
-                connection.execute(
-                    "DELETE FROM tool_rate_events WHERE task_id = ? AND status = 'reserved'",
-                    (current["task_id"],),
-                )
+            task_id = current["task_id"]
+        if not approved:
+            memory_db.release_tool_rate_slots(task_id)
         return self.get(approval_id) or {}
 
     def list(self, status: str | None = None, tenant_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:

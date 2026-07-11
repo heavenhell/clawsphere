@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Any, Protocol
 
+from backend.guardrails.permission import permissions_for_roles
 from backend.memory.database import memory_db
 
 
@@ -52,11 +53,7 @@ class PostgresKnowledgeStore:
                     )
 
     def list_knowledge(self, roles: list[str], tenant_id: str = "global", tiers: tuple[int, ...] = (2, 3)) -> list[dict[str, Any]]:
-        permissions = ["public"]
-        if set(roles) & {"ops", "admin"}:
-            permissions.append("internal")
-        if "admin" in roles:
-            permissions.append("confidential")
+        permissions = permissions_for_roles(roles)
         with self.connect() as connection:
             connection.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id,))
             rows = connection.execute(
@@ -77,11 +74,7 @@ class PostgresKnowledgeStore:
         return result
 
     def get_knowledge(self, knowledge_id: str, roles: list[str], tenant_id: str = "global") -> dict[str, Any] | None:
-        permissions = ["public"]
-        if set(roles) & {"ops", "admin"}:
-            permissions.append("internal")
-        if "admin" in roles:
-            permissions.append("confidential")
+        permissions = permissions_for_roles(roles)
         with self.connect() as connection:
             connection.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id,))
             row = connection.execute(

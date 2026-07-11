@@ -47,13 +47,13 @@ function QueryApp() {
   const [approvals, setApprovals] = useState([]);
   const [messages, setMessages] = useState([
     {
+      id: crypto.randomUUID(),
       role: 'assistant',
       content: '我已接入 FusionCompute mock 环境，可以演示告警解释、容量预测和 VM 性能诊断。',
     },
   ]);
   const [input, setInput] = useState('');
   const [lastTrace, setLastTrace] = useState(null);
-  const [summary, setSummary] = useState('');
   const [loading, setLoading] = useState(false);
   const listRef = useRef(null);
 
@@ -82,7 +82,7 @@ function QueryApp() {
     const content = text.trim();
     if (!content || loading) return;
     setInput('');
-    setMessages((items) => [...items, { role: 'user', content }]);
+    setMessages((items) => [...items, { id: crypto.randomUUID(), role: 'user', content }]);
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/chat`, {
@@ -90,21 +90,14 @@ function QueryApp() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: content,
-          roles: ['readonly'],
-          history: messages.map((item) => ({
-            role: item.role,
-            content: item.content,
-          })),
-          summary,
           conversation_id: conversationId,
         }),
       });
       const data = await res.json();
       setLastTrace(data);
-      setSummary(data.summary || summary);
       setMessages((items) => {
-        const next = [...items, { role: 'assistant', content: data.answer }];
-        return data.summary ? next.slice(-12) : next;
+        const next = [...items, { id: crypto.randomUUID(), role: 'assistant', content: data.answer }];
+        return next.slice(-12);
       });
       await refreshSideData();
     } catch (error) {
@@ -175,8 +168,8 @@ function QueryApp() {
         </div>
 
         <div className="messageList" ref={listRef}>
-          {messages.map((message, index) => (
-            <div className={`message ${message.role}`} key={`${message.role}-${index}`}>
+          {messages.map((message) => (
+            <div className={`message ${message.role}`} key={message.id}>
               <div className="avatar">{message.role === 'user' ? <UserRound size={16} /> : <Bot size={16} />}</div>
               <div className="bubble">{message.content}</div>
             </div>

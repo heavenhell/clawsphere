@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -70,10 +71,18 @@ class ModifyHaPolicyParams(ClusterCapacityParams):
 class ToolRequest(BaseModel):
     tool_name: str
     params: dict[str, Any] = Field(default_factory=dict)
-    caller_user_id: str = "demo-user"
-    caller_roles: list[str] = Field(default_factory=lambda: ["readonly"])
-    task_id: str = "demo-task"
-    tenant_id: str = "demo-tenant"
+    caller_user_id: str
+    caller_roles: list[str]
+    task_id: str
+    tenant_id: str
+
+
+class GatewayToolRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tool_name: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    task_id: str = Field(default_factory=lambda: str(uuid4()))
 
 
 class ToolResponse(BaseModel):
