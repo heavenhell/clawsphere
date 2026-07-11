@@ -7,6 +7,7 @@
 - LangGraph 风格 Agent 编排
 - DeepSeek LLM 接入
 - FusionCompute mock 数据
+- Dorado mock 存储池数据
 - 告警解释、容量预测、VM 性能诊断三个演示场景
 
 ## 本地运行
@@ -59,3 +60,15 @@ Demo substitutions:
 - pgvector/BM25/RRF are represented by local skill retrieval for this demo.
 - PostgresSaver checkpoint is represented by frontend `history` plus `summary`.
 - Langfuse and Prometheus are not connected to external services yet.
+
+## MCP Server
+
+官方 MCP Python SDK Server 默认使用 stdio：
+
+```powershell
+python -m backend.mcp.mcp_server
+```
+
+设置 `MCP_TRANSPORT=streamable-http` 可切换为 Streamable HTTP。FastAPI 网关的
+`/api/tools/call` 同时支持 JWT Bearer 身份，开发环境可通过 `/api/auth/demo-token`
+获取演示令牌。

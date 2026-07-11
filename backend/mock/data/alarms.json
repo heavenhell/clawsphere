@@ -16,5 +16,32 @@
     "name": "主机CPU使用率过高",
     "status": "active",
     "first_seen": "2026-07-04T19:05:00+04:00"
+  },
+  {
+    "id": "alarm-9003",
+    "severity": "major",
+    "object_type": "vm",
+    "object_id": "vm-1001",
+    "name": "虚拟机 CPU Ready 持续过高",
+    "status": "active",
+    "first_seen": "2026-07-04T19:16:00+04:00"
+  },
+  {
+    "id": "alarm-9004",
+    "severity": "minor",
+    "object_type": "vm",
+    "object_id": "vm-1042",
+    "name": "虚拟机内存 Balloon 异常",
+    "status": "active",
+    "first_seen": "2026-07-04T19:22:00+04:00"
+  },
+  {
+    "id": "alarm-9005",
+    "severity": "warning",
+    "object_type": "datastore",
+    "object_id": "ds-002",
+    "name": "数据存储读写时延超过阈值",
+    "status": "cleared",
+    "first_seen": "2026-07-04T18:10:00+04:00"
   }
 ]

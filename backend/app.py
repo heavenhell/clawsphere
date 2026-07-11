@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from backend.agent.copilot import run_copilot
+from backend.mcp.auth import AuthContext, get_auth_context, issue_demo_token
 from backend.memory.store import MEMORY_WRITES
 from backend.mcp.schemas import ToolRequest
 from backend.mcp.tools import APPROVAL_QUEUE, AUDIT_LOG, TOOL_REGISTRY, call_tool
 from backend.mock.repository import repo
+from backend.mock.api import router as mock_router
 
 
 class ChatRequest(BaseModel):
@@ -16,6 +18,12 @@ class ChatRequest(BaseModel):
     roles: list[str] = ["readonly"]
     history: list[dict[str, str]] = []
     summary: str = ""
+
+
+class DemoTokenRequest(BaseModel):
+    user_id: str = "demo-user"
+    roles: list[str] = ["readonly"]
+    tenant_id: str = "demo-tenant"
 
 
 app = FastAPI(title="DCS Copilot Demo")
@@ -27,6 +35,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(mock_router)
 
 
 @app.get("/api/health")
@@ -47,19 +56,30 @@ def tools():
             "description": spec.description,
             "risk": spec.risk,
             "auth_roles": spec.auth_roles,
+            "input_schema": spec.input_model.model_json_schema(),
         }
         for spec in TOOL_REGISTRY.values()
     ]
 
 
+@app.post("/api/auth/demo-token")
+def demo_token(request: DemoTokenRequest):
+    return {"access_token": issue_demo_token(request.user_id, request.roles, request.tenant_id), "token_type": "bearer"}
+
+
 @app.post("/api/tools/call")
-def tool_call(request: ToolRequest):
-    return call_tool(request)
+def tool_call(request: ToolRequest, auth: AuthContext = Depends(get_auth_context)):
+    secured = request.model_copy(update={
+        "caller_user_id": auth.user_id,
+        "caller_roles": auth.roles,
+        "tenant_id": auth.tenant_id,
+    })
+    return call_tool(secured)
 
 
 @app.post("/api/chat")
-def chat(request: ChatRequest):
-    return run_copilot(request.message, request.roles, request.history, request.summary)
+def chat(request: ChatRequest, auth: AuthContext = Depends(get_auth_context)):
+    return run_copilot(request.message, auth.roles, request.history, request.summary)
 
 
 @app.get("/api/audit")

@@ -4,8 +4,11 @@ import json
 from pathlib import Path
 from statistics import mean
 
+from backend.interfaces.dorado import DoradoInterface
+from backend.interfaces.fusioncompute import FusionComputeInterface
 
-class MockRepository:
+
+class MockRepository(FusionComputeInterface, DoradoInterface):
     def __init__(self, base_dir: Path | None = None):
         self.base_dir = base_dir or Path(__file__).resolve().parent
         self.data_dir = self.base_dir / "data"
@@ -37,6 +40,12 @@ class MockRepository:
 
     def metrics(self):
         return self._load("metrics-sample.json")
+
+    def storage_pool_usage(self, pool_id: str | None = None):
+        pools = self.datastores()
+        if pool_id:
+            pools = [pool for pool in pools if pool["id"] == pool_id]
+        return pools
 
     def overview(self) -> dict:
         clusters = self.clusters()

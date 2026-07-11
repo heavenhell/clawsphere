@@ -16,5 +16,23 @@
     "status": "warning",
     "cpu_usage": 0.91,
     "memory_usage": 0.84
+  },
+  {
+    "id": "host-002",
+    "name": "fc-host-02",
+    "cluster_id": "cluster-001",
+    "management_ip": "10.20.1.12",
+    "status": "normal",
+    "cpu_usage": 0.46,
+    "memory_usage": 0.59
+  },
+  {
+    "id": "host-006",
+    "name": "fc-edge-03",
+    "cluster_id": "cluster-002",
+    "management_ip": "10.20.2.13",
+    "status": "normal",
+    "cpu_usage": 0.65,
+    "memory_usage": 0.69
   }
 ]

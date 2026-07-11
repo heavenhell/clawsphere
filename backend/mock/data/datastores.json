@@ -2,6 +2,7 @@
   {
     "id": "ds-001",
     "name": "DCS-DS-SAS-01",
+    "cluster_id": "cluster-001",
     "status": "normal",
     "capacity_gb": 20480,
     "free_gb": 8120
@@ -9,8 +10,19 @@
   {
     "id": "ds-002",
     "name": "DCS-DS-SSD-02",
+    "cluster_id": "cluster-002",
     "status": "warning",
     "capacity_gb": 10240,
-    "free_gb": 860
+    "free_gb": 860,
+    "latency_ms": 27
+  },
+  {
+    "id": "ds-003",
+    "name": "DCS-DS-ARCHIVE-03",
+    "cluster_id": "cluster-001",
+    "status": "normal",
+    "capacity_gb": 40960,
+    "free_gb": 28700,
+    "latency_ms": 8
   }
 ]

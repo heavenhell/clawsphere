@@ -6,8 +6,24 @@ from time import perf_counter
 from typing import Any, Callable
 from uuid import uuid4
 
+from pydantic import ValidationError
+
 from backend.guardrails.permission import has_allowed_role
-from backend.mcp.schemas import ToolRequest, ToolResponse
+from backend.mcp.schemas import (
+    AlarmDetailParams,
+    AlarmListParams,
+    ApprovalRequestParams,
+    ClusterCapacityParams,
+    EmptyParams,
+    ForecastParams,
+    StoragePoolParams,
+    ToolParams,
+    ToolRequest,
+    ToolResponse,
+    VmDetailParams,
+    VmListParams,
+    VmMetricsParams,
+)
 from backend.mock.repository import repo
 
 
@@ -17,6 +33,7 @@ class ToolSpec:
     description: str
     risk: str
     auth_roles: list[str]
+    input_model: type[ToolParams]
     fn: Callable[..., Any]
 
 
@@ -25,22 +42,29 @@ AUDIT_LOG: list[dict[str, Any]] = []
 APPROVAL_QUEUE: list[dict[str, Any]] = []
 
 
-def mcp_tool(name: str, description: str, risk: str = "none", auth_roles: list[str] | None = None):
+def mcp_tool(
+    name: str,
+    description: str,
+    input_model: type[ToolParams] = EmptyParams,
+    risk: str = "none",
+    auth_roles: list[str] | None = None,
+):
     def decorator(fn: Callable[..., Any]):
         TOOL_REGISTRY[name] = ToolSpec(
             name=name,
             description=description,
             risk=risk,
             auth_roles=auth_roles or ["readonly", "ops", "admin"],
+            input_model=input_model,
             fn=fn,
         )
         return fn
     return decorator
 
 
-@mcp_tool("list_alarms", "查询当前活动告警")
+@mcp_tool("list_alarms", "查询当前活动告警", AlarmListParams)
 def list_alarms(severity: str | None = None):
-    alarms = repo.alarms()
+    alarms = [alarm for alarm in repo.alarms() if alarm.get("status") == "active"]
     if severity:
         alarms = [a for a in alarms if a.get("severity") == severity]
     return alarms
@@ -59,7 +83,7 @@ def get_resource_overview():
     }
 
 
-@mcp_tool("get_alarm_detail", "查询告警详情和关联资源")
+@mcp_tool("get_alarm_detail", "查询告警详情和关联资源", AlarmDetailParams)
 def get_alarm_detail(alarm_id: str):
     alarm = next((a for a in repo.alarms() if a["id"] == alarm_id), None)
     if not alarm:
@@ -70,6 +94,8 @@ def get_alarm_detail(alarm_id: str):
         related["datastore"] = next((d for d in repo.datastores() if d["id"] == object_id), None)
     if alarm.get("object_type") == "host":
         related["host"] = next((h for h in repo.hosts() if h["id"] == object_id), None)
+    if alarm.get("object_type") == "vm":
+        related["vm"] = next((vm for vm in repo.vms() if vm["id"] == object_id), None)
     related["clusters"] = repo.clusters()
     related["vms"] = repo.vms()
     return {"alarm": alarm, "related": related}
@@ -80,12 +106,12 @@ def list_clusters():
     return repo.clusters()
 
 
-@mcp_tool("get_cluster_capacity", "查询指定集群容量和风险")
+@mcp_tool("get_cluster_capacity", "查询指定集群容量和风险", ClusterCapacityParams)
 def get_cluster_capacity(cluster_id: str):
     cluster = next((c for c in repo.clusters() if c["id"] == cluster_id), None)
     if not cluster:
         return None
-    datastores = repo.datastores()
+    datastores = [ds for ds in repo.datastores() if ds.get("cluster_id") == cluster_id]
     total = sum(ds.get("capacity_gb", 0) for ds in datastores)
     free = sum(ds.get("free_gb", 0) for ds in datastores)
     return {
@@ -97,7 +123,7 @@ def get_cluster_capacity(cluster_id: str):
     }
 
 
-@mcp_tool("list_vms", "查询虚拟机列表")
+@mcp_tool("list_vms", "查询虚拟机列表", VmListParams)
 def list_vms(status: str | None = None):
     vms = repo.vms()
     if status:
@@ -105,7 +131,7 @@ def list_vms(status: str | None = None):
     return vms
 
 
-@mcp_tool("get_vm_detail", "查询虚拟机详情、主机和关联告警")
+@mcp_tool("get_vm_detail", "查询虚拟机详情、主机和关联告警", VmDetailParams)
 def get_vm_detail(vm_id: str):
     vm = next((item for item in repo.vms() if item["id"] == vm_id or item["name"] == vm_id), None)
     if not vm:
@@ -114,15 +140,20 @@ def get_vm_detail(vm_id: str):
     return {"vm": vm, "host": host, "alarms": repo.alarms()}
 
 
-@mcp_tool("get_vm_metrics", "查询虚拟机性能指标")
+@mcp_tool("get_vm_metrics", "查询虚拟机性能指标", VmMetricsParams)
 def get_vm_metrics(vm_id: str, metric_names: list[str] | None = None, time_range: str = "1h"):
     detail = get_vm_detail(vm_id)
     vm = detail["vm"] if detail else {"id": vm_id, "name": vm_id}
+    cpu_usage = 86 if vm.get("name") == "dcs-app-01" else 42
+    cpu_ready = 6.8 if vm.get("name") == "dcs-app-01" else 1.1
+    balloon = 640 if vm.get("name") == "dcs-cache-01" else 0
+    disk_latency = 24 if vm.get("host_id") == "host-005" else 9
     base = [
-        {"metric": "cpu.usage", "value": 86 if vm.get("name") == "dcs-app-01" else 42, "unit": "%", "status": "warning"},
-        {"metric": "cpu.ready", "value": 6.8 if vm.get("name") == "dcs-app-01" else 1.1, "unit": "%", "status": "warning"},
+        {"metric": "cpu.usage", "value": cpu_usage, "unit": "%", "status": "warning" if cpu_usage > 80 else "normal"},
+        {"metric": "cpu.ready", "value": cpu_ready, "unit": "%", "status": "warning" if cpu_ready > 5 else "normal"},
         {"metric": "mem.usage", "value": 72, "unit": "%", "status": "normal"},
-        {"metric": "disk.latency", "value": 24 if vm.get("host_id") == "host-005" else 9, "unit": "ms", "status": "warning"},
+        {"metric": "mem.balloon", "value": balloon, "unit": "MB", "status": "warning" if balloon else "normal"},
+        {"metric": "disk.latency", "value": disk_latency, "unit": "ms", "status": "warning" if disk_latency > 20 else "normal"},
         {"metric": "net.drop", "value": 0.2, "unit": "%", "status": "normal"},
     ]
     if metric_names:
@@ -130,7 +161,7 @@ def get_vm_metrics(vm_id: str, metric_names: list[str] | None = None, time_range
     return {"vm": vm, "time_range": time_range, "series": base}
 
 
-@mcp_tool("run_capacity_forecast", "基于 mock 历史指标预测容量风险")
+@mcp_tool("run_capacity_forecast", "基于 mock 历史指标预测容量风险", ForecastParams)
 def run_capacity_forecast(cluster_id: str, forecast_days: int = 30):
     capacity = get_cluster_capacity(cluster_id)
     if not capacity:
@@ -148,7 +179,18 @@ def run_capacity_forecast(cluster_id: str, forecast_days: int = 30):
     }
 
 
-@mcp_tool("create_approval_request", "创建高风险操作审批项", risk="medium", auth_roles=["ops", "admin"])
+@mcp_tool("get_storage_pool_usage", "查询 Dorado 存储池容量和时延", StoragePoolParams)
+def get_storage_pool_usage(pool_id: str | None = None):
+    return repo.storage_pool_usage(pool_id)
+
+
+@mcp_tool(
+    "create_approval_request",
+    "创建高风险操作审批项",
+    ApprovalRequestParams,
+    risk="medium",
+    auth_roles=["ops", "admin"],
+)
 def create_approval_request(title: str, description: str, risk: str = "high"):
     item = {
         "id": f"approval-{len(APPROVAL_QUEUE) + 1:04d}",
@@ -186,7 +228,8 @@ def call_tool(request: ToolRequest) -> ToolResponse:
         )
     else:
         try:
-            data = spec.fn(**request.params)
+            params = spec.input_model.model_validate(request.params).model_dump(exclude_none=True)
+            data = spec.fn(**params)
             response = ToolResponse(
                 tool_name=request.tool_name,
                 success=True,
@@ -194,7 +237,7 @@ def call_tool(request: ToolRequest) -> ToolResponse:
                 execution_time_ms=int((perf_counter() - started) * 1000),
                 audit_id=audit_id,
             )
-        except TypeError as exc:
+        except (TypeError, ValidationError) as exc:
             response = ToolResponse(
                 tool_name=request.tool_name,
                 success=False,

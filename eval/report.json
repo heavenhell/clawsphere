@@ -10,7 +10,7 @@
       "tools": [
         "list_alarms"
       ],
-      "answer": "当前共有 2 条活动告警。\n\n- alarm-9001：数据存储剩余容量不足，级别 major，对象 datastore / ds-002，状态 active\n- alarm-9002：主机CPU使用率过高，级别 minor，对象 host / host-005，状态 active\n\n你可以继续问：第一条告警的原因？第二条呢？"
+      "answer": "当前共有 4 条活动告警。\n\n- alarm-9001：数据存储剩余容量不足，级别 major，对象 datastore / ds-002，状态 active\n- alarm-9002：主机CPU使用率过高，级别 minor，对象 host / host-005，状态 active\n- alarm-9003：虚拟机 CPU Ready 持续过高，级别 major，对象 vm / vm-1001，状"
     },
     {
       "name": "alarm_second_context",
@@ -32,7 +32,7 @@
         "list_clusters",
         "list_vms"
       ],
-      "answer": "当前共有 2 台虚拟机。\n\n- dcs-app-01：running，4 vCPU，8192MB，IP 172.16.10.21，所在主机 host-001\n- dcs-db-standby：stopped，8 vCPU，32768MB，IP 172.16.20.31，所在主机 host-005"
+      "answer": "当前共有 5 台虚拟机。\n\n- dcs-app-01：running，4 vCPU，8192MB，IP 172.16.10.21，所在主机 host-001\n- dcs-db-standby：stopped，8 vCPU，32768MB，IP 172.16.20.31，所在主机 host-005\n- dcs-api-02：running，4 vCPU，16384MB，IP 172.16.10.22"
     },
     {
       "name": "capacity_forecast",
@@ -42,7 +42,7 @@
         "get_cluster_capacity",
         "run_capacity_forecast"
       ],
-      "answer": "结论：cluster-002 容量风险为 medium。\n\n证据：日增长约 95GB，预计 94 天后耗尽。\n\n建议动作：建议优先扩容数据存储或清理低价值快照，并评估 VM 迁移窗口。"
+      "answer": "结论：cluster-002 容量风险为 critical。\n\n证据：日增长约 95GB，预计 9 天后耗尽。\n\n建议动作：建议优先扩容数据存储或清理低价值快照，并评估 VM 迁移窗口。"
     },
     {
       "name": "write_denied",

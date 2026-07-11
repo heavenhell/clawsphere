@@ -20,7 +20,7 @@ TEST_CASES = [
         "message": "有多少虚拟机",
         "intent": "resource_query",
         "must_tools": ["get_resource_overview"],
-        "must_contain": ["2 台虚拟机"],
+        "must_contain": ["5 台虚拟机"],
     },
     {
         "name": "capacity_forecast",

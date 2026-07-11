@@ -16,5 +16,32 @@
     "cpu": 8,
     "memory_mb": 32768,
     "ip": "172.16.20.31"
+  },
+  {
+    "id": "vm-1033",
+    "name": "dcs-api-02",
+    "status": "running",
+    "host_id": "host-002",
+    "cpu": 4,
+    "memory_mb": 16384,
+    "ip": "172.16.10.22"
+  },
+  {
+    "id": "vm-1042",
+    "name": "dcs-cache-01",
+    "status": "running",
+    "host_id": "host-005",
+    "cpu": 8,
+    "memory_mb": 16384,
+    "ip": "172.16.20.42"
+  },
+  {
+    "id": "vm-1058",
+    "name": "dcs-monitor-01",
+    "status": "running",
+    "host_id": "host-006",
+    "cpu": 2,
+    "memory_mb": 8192,
+    "ip": "172.16.20.58"
   }
 ]
