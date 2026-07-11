@@ -67,6 +67,21 @@ def test_agent_returns_rolling_summary_after_six_turns():
     assert len(result["summary"]) <= 1200
 
 
+def test_each_turn_resets_transient_graph_state():
+    conversation_id = "transient-state-test"
+    resources = run_copilot("我现在有哪些资源？", conversation_id=conversation_id)
+    alarms = run_copilot("我现在有哪些严重告警？", conversation_id=conversation_id)
+    capacity = run_copilot("cluster-002 还能撑多久？", conversation_id=conversation_id)
+
+    assert resources["intent"] == "resource_query"
+    assert "资源盘点" in resources["answer"]
+    assert alarms["intent"] == "alert_explain"
+    assert "活动告警" in alarms["answer"]
+    assert capacity["intent"] == "capacity_forecast"
+    assert "9 天" in capacity["answer"]
+    assert len({resources["answer"], alarms["answer"], capacity["answer"]}) == 3
+
+
 def test_chinese_token_estimate_and_summary_boundary():
     messages = [{"role": "user", "content": "这是十个中文字符测试文本"}]
     assert estimate_tokens(messages) >= 10
