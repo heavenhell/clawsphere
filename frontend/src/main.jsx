@@ -31,6 +31,12 @@ function metricPercent(value) {
 }
 
 function App() {
+  const [conversationId] = useState(() => {
+    const existing = localStorage.getItem('clawsphere-conversation-id');
+    const value = existing || crypto.randomUUID();
+    localStorage.setItem('clawsphere-conversation-id', value);
+    return value;
+  });
   const [overview, setOverview] = useState(null);
   const [tools, setTools] = useState([]);
   const [audit, setAudit] = useState([]);
@@ -81,17 +87,21 @@ function App() {
         body: JSON.stringify({
           message: content,
           roles: ['readonly'],
-          history: messages.slice(-8).map((item) => ({
+          history: messages.map((item) => ({
             role: item.role,
             content: item.content,
           })),
           summary,
+          conversation_id: conversationId,
         }),
       });
       const data = await res.json();
       setLastTrace(data);
       setSummary(data.summary || summary);
-      setMessages((items) => [...items, { role: 'assistant', content: data.answer }]);
+      setMessages((items) => {
+        const next = [...items, { role: 'assistant', content: data.answer }];
+        return data.summary ? next.slice(-12) : next;
+      });
       await refreshSideData();
     } catch (error) {
       setMessages((items) => [

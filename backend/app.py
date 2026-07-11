@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.agent.copilot import run_copilot
 from backend.mcp.auth import AuthContext, get_auth_context, issue_demo_token
-from backend.memory.store import MEMORY_WRITES
+from backend.memory.store import list_memory_writes
 from backend.mcp.schemas import ToolRequest
 from backend.mcp.tools import APPROVAL_QUEUE, AUDIT_LOG, TOOL_REGISTRY, call_tool
 from backend.mock.repository import repo
@@ -15,14 +15,15 @@ from backend.mock.api import router as mock_router
 
 class ChatRequest(BaseModel):
     message: str
-    roles: list[str] = ["readonly"]
-    history: list[dict[str, str]] = []
+    roles: list[str] = Field(default_factory=lambda: ["readonly"])
+    history: list[dict[str, str]] = Field(default_factory=list)
     summary: str = ""
+    conversation_id: str = "demo-conversation"
 
 
 class DemoTokenRequest(BaseModel):
     user_id: str = "demo-user"
-    roles: list[str] = ["readonly"]
+    roles: list[str] = Field(default_factory=lambda: ["readonly"])
     tenant_id: str = "demo-tenant"
 
 
@@ -79,7 +80,15 @@ def tool_call(request: ToolRequest, auth: AuthContext = Depends(get_auth_context
 
 @app.post("/api/chat")
 def chat(request: ChatRequest, auth: AuthContext = Depends(get_auth_context)):
-    return run_copilot(request.message, auth.roles, request.history, request.summary)
+    return run_copilot(
+        request.message,
+        auth.roles,
+        request.history,
+        request.summary,
+        request.conversation_id,
+        auth.user_id,
+        auth.tenant_id,
+    )
 
 
 @app.get("/api/audit")
@@ -94,4 +103,4 @@ def approvals():
 
 @app.get("/api/memory")
 def memory():
-    return MEMORY_WRITES[-50:]
+    return list_memory_writes(50)

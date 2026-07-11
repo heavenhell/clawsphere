@@ -41,3 +41,10 @@ def call_deepseek(system_prompt: str, user_prompt: str) -> str | None:
     with urllib.request.urlopen(request, timeout=30) as response:
         body = json.loads(response.read().decode("utf-8"))
     return body["choices"][0]["message"]["content"]
+
+
+def summarize_messages(messages: list[dict[str, str]]) -> str | None:
+    return call_deepseek(
+        "你负责压缩运维对话。保留资源标识、告警编号、执行结论、用户偏好和待处理事项，不超过300 token。",
+        json.dumps(messages, ensure_ascii=False),
+    )

@@ -55,10 +55,13 @@ Implemented from the design docs:
 - MCP wrapper: `backend/mcp/mcp_server.py` exposes stdio-style `tools/list` and `tools/call`.
 - Eval: run `python -m eval.evaluator`.
 
-Demo substitutions:
+Current storage modes:
 
-- pgvector/BM25/RRF are represented by local skill retrieval for this demo.
-- PostgresSaver checkpoint is represented by frontend `history` plus `summary`.
+- 默认 `DCS_MEMORY_BACKEND=sqlite`，用于无需外部服务的本地演示。
+- 设置 `DCS_MEMORY_BACKEND=postgres` 和 `POSTGRES_DSN` 后，Skill 知识进入 pgvector；
+  `docker compose up -d postgres` 可启动本项目的 pgvector 环境。
+- 检索使用 BM25、128 维哈希向量和 RRF 融合，先做租户与密级过滤。
+- 对话保留最近 6 轮，旧内容压缩为滚动摘要，并持久化到本地数据库。
 - Langfuse and Prometheus are not connected to external services yet.
 
 ## MCP Server

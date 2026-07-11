@@ -3,16 +3,19 @@ from __future__ import annotations
 import json
 import re
 from typing import Any, Literal, TypedDict
+from uuid import uuid4
 
 from langgraph.graph import END, StateGraph
 
-from backend.agent.llm import call_deepseek
+from backend.agent.llm import call_deepseek, summarize_messages
 from backend.guardrails.policy import detect_write_intent, validate_tool_calls
 from backend.mcp.schemas import ToolRequest
 from backend.mcp.tools import APPROVAL_QUEUE, call_tool
-from backend.memory.context_manager import split_context
-from backend.memory.retriever import retrieve
+from backend.memory.context_manager import deterministic_summary, manage_context_window
+from backend.memory.database import memory_db
+from backend.memory.retriever import retrieve, retrieve_history, retrieve_skill_detail
 from backend.memory.store import write_conversation_summary
+from backend.skills.loader import startup_skill_summaries
 
 
 class CopilotState(TypedDict, total=False):
@@ -20,6 +23,7 @@ class CopilotState(TypedDict, total=False):
     message: str
     intent: str
     task_id: str
+    conversation_id: str
     user_id: str
     user_roles: list[str]
     tenant_id: str
@@ -40,10 +44,13 @@ class CopilotState(TypedDict, total=False):
     error: str | None
 
 
-SYSTEM_PROMPT = """你是 DCS/FusionCompute 运维 Copilot。
+SYSTEM_PROMPT = f"""你是 DCS/FusionCompute 运维 Copilot。
 回答要自然，但在识别到运维意图时必须基于工具结果和检索到的 Skill。
 不要编造工具结果之外的资源状态。写操作、变更、重启、删除、扩容只能进入审批，不能声称已执行。
-输出优先包含：结论、证据、建议动作、风险/下一步。"""
+输出优先包含：结论、证据、建议动作、风险/下一步。
+
+可用 Skill 第一层：
+{startup_skill_summaries()}"""
 
 
 def _contains(message: str, words: list[str]) -> bool:
@@ -154,7 +161,17 @@ def intent_classifier(state: CopilotState) -> CopilotState:
 
 
 def context_loader(state: CopilotState) -> CopilotState:
-    context = split_context(state.get("messages", []), state.get("conversation_summary", ""))
+    def summarizer(messages: list[dict[str, str]]) -> str:
+        try:
+            return summarize_messages(messages) or deterministic_summary(messages)
+        except Exception:
+            return deterministic_summary(messages)
+
+    context = manage_context_window(
+        state.get("messages", []),
+        state.get("conversation_summary", ""),
+        summarizer,
+    )
     snapshot = call_tool(ToolRequest(tool_name="get_resource_overview", params={}, caller_roles=state["user_roles"]))
     return {
         "recent_messages": context["recent_messages"],
@@ -165,13 +182,23 @@ def context_loader(state: CopilotState) -> CopilotState:
 
 
 def memory_retriever(state: CopilotState) -> CopilotState:
-    docs = retrieve(state["message"], state["user_roles"], top_k=5)
-    return {"retrieved_docs": docs, "retrieved_history": []}
+    docs = retrieve(state["message"], state["user_roles"], top_k=3, tenant_id=state["tenant_id"], tier=2)
+    history = retrieve_history(state["message"], state["user_roles"], top_k=2, tenant_id=state["tenant_id"])
+    return {"retrieved_docs": docs, "retrieved_history": history}
 
 
 def planner(state: CopilotState) -> CopilotState:
     calls = plan_tools(state["intent"], state["message"], state.get("recent_messages", []))
-    return {"plan": make_plan(state["intent"], state["message"]), "tool_calls_proposed": calls}
+    docs = list(state.get("retrieved_docs", []))
+    if docs:
+        detail = retrieve_skill_detail(docs[0]["id"], state["user_roles"], state["tenant_id"])
+        if detail:
+            docs.append(detail)
+    return {
+        "plan": make_plan(state["intent"], state["message"]),
+        "tool_calls_proposed": calls,
+        "retrieved_docs": docs,
+    }
 
 
 def guardrail(state: CopilotState) -> CopilotState:
@@ -301,9 +328,17 @@ def response_generator(state: CopilotState) -> CopilotState:
 
 
 def memory_writer(state: CopilotState) -> CopilotState:
-    summary = f"intent={state.get('intent')}; message={state.get('message')[:120]}; tools={[r.get('tool_name') for r in state.get('tool_results', [])]}"
-    write_conversation_summary(state["task_id"], summary, state.get("execution_log", []))
-    return {"summary": summary}
+    turn_summary = f"intent={state.get('intent')}; message={state.get('message')[:120]}; tools={[r.get('tool_name') for r in state.get('tool_results', [])]}"
+    write_conversation_summary(state["task_id"], turn_summary, state.get("execution_log", []))
+    memory_db.append_turn(
+        state["conversation_id"],
+        state["user_id"],
+        state["tenant_id"],
+        state["message"],
+        state.get("final_response", ""),
+        state.get("conversation_summary", ""),
+    )
+    return {"summary": turn_summary}
 
 
 def error_handler(state: CopilotState) -> CopilotState:
@@ -356,15 +391,24 @@ def run_copilot(
     roles: list[str] | None = None,
     history: list[dict[str, str]] | None = None,
     summary: str = "",
+    conversation_id: str | None = None,
+    user_id: str = "demo-user",
+    tenant_id: str = "demo-tenant",
 ) -> dict[str, Any]:
+    conversation_id = conversation_id or f"conversation-{uuid4()}"
     messages = history or []
+    if not messages:
+        stored_messages, stored_summary = memory_db.load_conversation(conversation_id)
+        messages = stored_messages
+        summary = summary or stored_summary
     state = GRAPH.invoke({
         "messages": messages,
         "message": message,
         "task_id": "demo-task",
-        "user_id": "demo-user",
+        "conversation_id": conversation_id,
+        "user_id": user_id,
         "user_roles": roles or ["readonly"],
-        "tenant_id": "demo-tenant",
+        "tenant_id": tenant_id,
         "conversation_summary": summary,
         "tool_results": [],
         "execution_log": [],
