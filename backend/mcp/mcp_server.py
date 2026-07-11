@@ -17,7 +17,7 @@ mcp = FastMCP(
 )
 
 
-def _call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+def _call(name: str, arguments: dict[str, Any], task_id: str | None = None) -> dict[str, Any]:
     auth = get_mcp_auth_context()
     response = call_tool(ToolRequest(
         tool_name=name,
@@ -25,7 +25,7 @@ def _call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         caller_user_id=auth.user_id,
         caller_roles=auth.roles,
         tenant_id=auth.tenant_id,
-        task_id=str(uuid4()),
+        task_id=task_id or str(uuid4()),
     ))
     return response.model_dump(mode="json")
 
@@ -79,21 +79,36 @@ def get_storage_pool_usage(pool_id: str | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
-def restart_vm(vm_id: str, reason: str, change_ticket_id: str) -> dict[str, Any]:
-    """Restart a VM. The gateway requires ops/admin role and prior HITL approval."""
-    return _call("restart_vm", {"vm_id": vm_id, "reason": reason, "change_ticket_id": change_ticket_id})
+def create_approval_request(
+    task_id: str,
+    title: str,
+    description: str,
+    tool_calls: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Create an external approval ticket bound to exact write tools and parameters."""
+    return _call(
+        "create_approval_request",
+        {"title": title, "description": description, "tool_calls": tool_calls},
+        task_id,
+    )
 
 
 @mcp.tool()
-def scale_cluster(cluster_id: str, target_hosts: int, reason: str) -> dict[str, Any]:
-    """Change cluster host count. The gateway requires admin role and prior HITL approval."""
-    return _call("scale_cluster", {"cluster_id": cluster_id, "target_hosts": target_hosts, "reason": reason})
+def restart_vm(task_id: str, vm_id: str, reason: str, change_ticket_id: str) -> dict[str, Any]:
+    """Restart a VM using the task_id of a previously approved matching request."""
+    return _call("restart_vm", {"vm_id": vm_id, "reason": reason, "change_ticket_id": change_ticket_id}, task_id)
 
 
 @mcp.tool()
-def modify_ha_policy(cluster_id: str, policy: dict[str, Any], reason: str) -> dict[str, Any]:
-    """Modify cluster HA policy. The gateway requires admin role and prior HITL approval."""
-    return _call("modify_ha_policy", {"cluster_id": cluster_id, "policy": policy, "reason": reason})
+def scale_cluster(task_id: str, cluster_id: str, target_hosts: int, reason: str) -> dict[str, Any]:
+    """Change cluster host count using the task_id of an approved matching request."""
+    return _call("scale_cluster", {"cluster_id": cluster_id, "target_hosts": target_hosts, "reason": reason}, task_id)
+
+
+@mcp.tool()
+def modify_ha_policy(task_id: str, cluster_id: str, policy: dict[str, Any], reason: str) -> dict[str, Any]:
+    """Modify HA policy using the task_id of an approved matching request."""
+    return _call("modify_ha_policy", {"cluster_id": cluster_id, "policy": policy, "reason": reason}, task_id)
 
 
 def main() -> None:

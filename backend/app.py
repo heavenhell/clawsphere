@@ -173,7 +173,7 @@ def decide_approval(
         raise HTTPException(status_code=403, detail="发起人不能审批自己的变更")
     if approval["risk"] == "high" and "admin" not in auth.roles:
         raise HTTPException(status_code=403, detail="高风险变更必须由 admin 审批")
-    if not approval["tool_calls"]:
+    if not approval["resume_required"]:
         try:
             decided = approval_store.decide(approval_id, request.approved, auth.user_id, request.reason)
         except (KeyError, PermissionError, RuntimeError, ValueError) as exc:

@@ -95,7 +95,15 @@ docker compose up -d postgres
 python -m backend.mcp.mcp_server
 ```
 
-设置 `MCP_TRANSPORT=streamable-http` 可切换到 Streamable HTTP。每次 MCP 调用都会写入 caller、tenant、task 和 audit_id；高风险工具还必须匹配已批准审批。
+设置 `MCP_TRANSPORT=streamable-http` 可切换到 Streamable HTTP。每次 MCP 调用都会写入 caller、tenant、task 和 audit_id。
+
+MCP/API 外部写操作采用一次性审批票据：
+
+1. 调用 `create_approval_request`，传入调用方生成的 `task_id` 和完整 `tool_calls`（工具名及参数）。
+2. 独立审批人在 `/api/approvals/{id}/decision` 批准该任务。
+3. 调用 `restart_vm`、`scale_cluster` 或 `modify_ha_policy` 时携带同一个 `task_id` 和完全一致的参数。
+
+执行成功后审批状态变为 `executed`，同一票据不能重复执行，也不能用于其他工具或参数。
 
 ## API
 

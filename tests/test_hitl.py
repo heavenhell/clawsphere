@@ -41,7 +41,7 @@ def test_high_risk_change_pauses_then_resumes_once():
     assert memory_db.count_mock_changes() == before + 1
     assert resumed["tool_results"][-1]["tool_name"] == "restart_vm"
     assert resumed["tool_results"][-1]["success"]
-    assert approval_store.get(approval_id)["status"] == "approved"
+    assert approval_store.get(approval_id)["status"] == "executed"
 
 
 def test_rejected_change_never_executes():

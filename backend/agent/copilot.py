@@ -12,7 +12,7 @@ from langgraph.types import Command, interrupt
 from backend.agent.llm import call_deepseek, call_deepseek_tool_plan, classify_intent_with_llm, summarize_messages
 from backend.agent.checkpoint import close_checkpointer, get_checkpointer
 from backend.guardrails.approvals import approval_store
-from backend.guardrails.policy import detect_write_intent, record_tool_execution, risk_for_tool, validate_tool_calls
+from backend.guardrails.policy import detect_write_intent, risk_for_tool, validate_tool_calls
 from backend.mcp.schemas import ToolRequest
 from backend.mcp.tools import TOOL_REGISTRY, call_tool
 from backend.memory.context_manager import deterministic_summary, manage_context_window
@@ -349,8 +349,6 @@ def tool_executor(state: CopilotState) -> CopilotState:
         ))
         result = response.model_dump()
         results.append(result)
-        if response.success:
-            record_tool_execution(state["task_id"], call["tool_name"], call["params"])
         execution_log.append({"tool_name": call["tool_name"], "success": response.success, "audit_id": response.audit_id})
     return {"tool_results": results, "execution_log": execution_log}
 
@@ -610,27 +608,23 @@ def _format_result(state: dict[str, Any], conversation_id: str) -> dict[str, Any
 def run_copilot(
     message: str,
     roles: list[str] | None = None,
-    history: list[dict[str, str]] | None = None,
-    summary: str = "",
     conversation_id: str | None = None,
     user_id: str = "demo-user",
     tenant_id: str = "demo-tenant",
 ) -> dict[str, Any]:
     conversation_id = conversation_id or f"conversation-{uuid4()}"
     stored_messages, stored_summary = memory_db.load_conversation(conversation_id, user_id, tenant_id)
-    messages = stored_messages or history or []
-    summary = stored_summary or summary
     task_id = str(uuid4())
     config = {"configurable": {"thread_id": conversation_id}}
     state = get_graph().invoke({
-        "messages": messages,
+        "messages": stored_messages,
         "message": message,
         "task_id": task_id,
         "conversation_id": conversation_id,
         "user_id": user_id,
         "user_roles": roles or ["readonly"],
         "tenant_id": tenant_id,
-        "conversation_summary": summary,
+        "conversation_summary": stored_summary,
         "tool_results": [],
         "execution_log": [],
         "hitl_required": False,

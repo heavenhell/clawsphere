@@ -101,8 +101,3 @@ def validate_tool_calls(
         "tool_calls": approved_calls,
         "violations": violations,
     }
-
-
-def record_tool_execution(task_id: str, tool_name: str, params: dict[str, Any]) -> None:
-    resource_id = params.get("vm_id") or params.get("cluster_id") or "global"
-    memory_db.mark_tool_rate_executed(task_id, tool_name, resource_id)

@@ -186,8 +186,8 @@ def get_storage_pool_usage(pool_id: str | None = None):
     risk="none",
     auth_roles=["ops", "admin"],
 )
-def create_approval_request(title: str, description: str, risk: str = "high"):
-    return {"title": title, "description": description, "risk": risk}
+def create_approval_request(title: str, description: str, tool_calls: list[dict[str, Any]]):
+    return {"title": title, "description": description, "tool_calls": tool_calls}
 
 
 @mcp_tool("restart_vm", "重启指定虚拟机", RestartVmParams, risk="high", auth_roles=["ops", "admin"])
@@ -291,14 +291,32 @@ def call_tool(request: ToolRequest) -> ToolResponse:
                 else:
                     tool_response = response(True, data=spec.fn(**params))
             elif request.tool_name == "create_approval_request":
+                from backend.guardrails.policy import validate_tool_calls
+
+                validation = validate_tool_calls(
+                    params["tool_calls"],
+                    request.caller_roles,
+                    params["description"],
+                    request.task_id,
+                )
+                if not validation["allowed"]:
+                    raise ValueError("；".join(validation["violations"]))
+                if not validation["hitl_required"]:
+                    raise ValueError("审批单必须至少包含一个 medium 或 high 风险工具")
+                risk_order = {"none": 0, "low": 1, "medium": 2, "high": 3}
+                approval_risk = max(
+                    (TOOL_REGISTRY[call["tool_name"]].risk for call in validation["tool_calls"]),
+                    key=lambda risk: risk_order.get(risk, 0),
+                )
                 data = approval_store.create_or_get(
                     request.task_id,
                     request.task_id,
                     request.caller_user_id,
                     request.tenant_id,
                     params["description"],
-                    [],
-                    params["risk"],
+                    validation["tool_calls"],
+                    approval_risk,
+                    resume_required=False,
                 )
                 tool_response = response(True, data=data)
             else:
@@ -327,6 +345,8 @@ def call_tool(request: ToolRequest) -> ToolResponse:
         payload = tool_response.data if isinstance(tool_response.data, dict) else {"result": tool_response.data}
         resource_id = request.params.get("vm_id") or request.params.get("cluster_id") or "unknown"
         memory_db.append_mock_change(request.task_id, request.tool_name, resource_id, payload)
+        memory_db.mark_tool_rate_executed(request.task_id, request.tool_name, resource_id)
+        approval_store.mark_executed(request.task_id)
     TOOL_CALLS.labels(request.tool_name, str(tool_response.success).lower()).inc()
     TOOL_LATENCY.labels(request.tool_name).observe(tool_response.execution_time_ms / 1000)
     return tool_response

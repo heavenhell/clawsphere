@@ -40,8 +40,9 @@ def manage_context_window(
     summary = existing_summary.strip()
     should_compress = bool(older) or estimate_tokens(history) > TOKEN_THRESHOLD
     if should_compress and older:
-        addition = (summarizer or deterministic_summary)(older)
-        summary = "\n".join(part for part in [summary, addition] if part).strip()
+        # Stored history is authoritative, so recompute its older segment instead of
+        # repeatedly appending the same turns to the persisted summary.
+        summary = (summarizer or deterministic_summary)(older).strip()
         if len(summary) > SUMMARY_MAX_CHARS:
             recursive_input = [{"role": "system", "content": summary}]
             summary = (summarizer or deterministic_summary)(recursive_input).strip()

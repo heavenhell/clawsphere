@@ -59,13 +59,10 @@ def test_conversation_isolated_by_user_and_tenant(tmp_path):
 
 
 def test_agent_returns_rolling_summary_after_six_turns():
-    history = []
-    for index in range(7):
-        history.extend([
-            {"role": "user", "content": f"查询第 {index} 轮资源"},
-            {"role": "assistant", "content": f"第 {index} 轮资源结果"},
-        ])
-    result = run_copilot("有多少虚拟机", history=history, conversation_id="summary-test")
+    conversation_id = "summary-test"
+    for index in range(8):
+        run_copilot(f"查询第 {index} 轮资源", conversation_id=conversation_id)
+    result = run_copilot("有多少虚拟机", conversation_id=conversation_id)
     assert "查询第 0 轮资源" in result["summary"]
     assert len(result["summary"]) <= 1200
 

@@ -5,9 +5,11 @@ import os
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from backend.agent.copilot import run_copilot
 from backend.agent.llm import call_deepseek
+from backend.memory.database import memory_db
 from eval.test_cases import TEST_CASES
 
 
@@ -30,7 +32,26 @@ def run_eval() -> dict[str, Any]:
     dimension_hits: dict[str, list[bool]] = defaultdict(list)
     category_hits: dict[str, list[bool]] = defaultdict(list)
     for case in TEST_CASES:
-        result = run_copilot(case["message"], ["readonly"], case.get("history", []))
+        conversation_id = f"eval-{uuid4()}"
+        user_id = "eval-user"
+        tenant_id = "eval-tenant"
+        for index, item in enumerate(case.get("history", [])):
+            if item.get("role") == "assistant":
+                memory_db.append_turn(
+                    conversation_id,
+                    user_id,
+                    tenant_id,
+                    f"评测上下文初始化 {index}",
+                    item.get("content", ""),
+                    "",
+                )
+        result = run_copilot(
+            case["message"],
+            ["readonly"],
+            conversation_id=conversation_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
         tools = [call["tool_name"] for call in result.get("tool_calls", [])]
         executed_tools = [item["tool_name"] for item in result.get("tool_results", []) if item.get("success")]
         answer = result.get("answer") or ""

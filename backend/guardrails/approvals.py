@@ -17,9 +17,14 @@ class ApprovalStore:
         description: str,
         tool_calls: list[dict[str, Any]],
         risk: str,
+        resume_required: bool = True,
     ) -> dict[str, Any]:
         existing = self.get_by_task(task_id)
         if existing:
+            if existing["user_id"] != user_id or existing["tenant_id"] != tenant_id:
+                raise PermissionError("task id belongs to another user or tenant")
+            if existing["tool_calls"] != tool_calls or existing["resume_required"] != resume_required:
+                raise ValueError("task id already exists with a different approval payload")
             return existing
         now = datetime.now(timezone.utc).isoformat()
         approval_id = f"approval-{task_id[-8:]}"
@@ -27,10 +32,14 @@ class ApprovalStore:
             connection.execute(
                 """
                 INSERT OR IGNORE INTO approvals
-                    (id, task_id, conversation_id, user_id, tenant_id, description, tool_calls, risk, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                    (id, task_id, conversation_id, user_id, tenant_id, description, tool_calls, risk,
+                     resume_required, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                 """,
-                (approval_id, task_id, conversation_id, user_id, tenant_id, description, json.dumps(tool_calls, ensure_ascii=False), risk, now),
+                (
+                    approval_id, task_id, conversation_id, user_id, tenant_id, description,
+                    json.dumps(tool_calls, ensure_ascii=False), risk, int(resume_required), now,
+                ),
             )
         return self.get_by_task(task_id) or {}
 
@@ -92,10 +101,20 @@ class ApprovalStore:
             rows = connection.execute(query, params).fetchall()
         return [self._decode(row) for row in rows]
 
+    def mark_executed(self, task_id: str) -> None:
+        with memory_db.connect() as connection:
+            cursor = connection.execute(
+                "UPDATE approvals SET status = 'executed' WHERE task_id = ? AND status = 'approved'",
+                (task_id,),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("approval is not in an executable state")
+
     @staticmethod
     def _decode(row) -> dict[str, Any]:
         item = dict(row)
         item["tool_calls"] = json.loads(item["tool_calls"])
+        item["resume_required"] = bool(item["resume_required"])
         return item
 
 

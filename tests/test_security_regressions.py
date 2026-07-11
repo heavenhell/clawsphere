@@ -94,20 +94,55 @@ def test_direct_high_risk_tool_call_requires_approved_task():
     assert response.error_code == "APPROVAL_REQUIRED"
 
 
-def test_tool_created_approval_uses_the_shared_approval_store():
+def test_external_api_approval_executes_exact_tool_once():
     task_id = f"tool-approval-{uuid4()}"
-    response = call_tool(ToolRequest(
-        tool_name="create_approval_request",
-        params={"title": "测试审批", "description": "验证统一审批存储", "risk": "high"},
-        caller_user_id="ops-maker",
-        caller_roles=["ops"],
-        tenant_id="tenant-approval",
-        task_id=task_id,
-    ))
-    assert response.success
-    stored = approval_store.get(response.data["id"], tenant_id="tenant-approval")
-    assert stored is not None
-    assert stored["task_id"] == task_id
+    params = {
+        "vm_id": "vm-1024",
+        "reason": "external API approval test",
+        "change_ticket_id": "DEMO-EXTERNAL",
+    }
+    maker_token = _token("ops-maker", ["ops"], "tenant-approval")
+    checker_token = _token("admin-checker", ["admin"], "tenant-approval")
+    created = client.post(
+        "/api/tools/call",
+        headers={"Authorization": f"Bearer {maker_token}"},
+        json={
+            "tool_name": "create_approval_request",
+            "task_id": task_id,
+            "params": {
+                "title": "测试审批",
+                "description": "验证外部审批执行闭环",
+                "tool_calls": [{"tool_name": "restart_vm", "params": params}],
+            },
+        },
+    ).json()
+    assert created["success"]
+    approval_id = created["data"]["id"]
+    stored = approval_store.get(approval_id, tenant_id="tenant-approval")
+    assert stored and not stored["resume_required"]
+
+    decision = client.post(
+        f"/api/approvals/{approval_id}/decision",
+        headers={"Authorization": f"Bearer {checker_token}"},
+        json={"approved": True, "reason": "approved external request"},
+    )
+    assert decision.status_code == 200
+
+    executed = client.post(
+        "/api/tools/call",
+        headers={"Authorization": f"Bearer {maker_token}"},
+        json={"tool_name": "restart_vm", "task_id": task_id, "params": params},
+    ).json()
+    assert executed["success"]
+    assert approval_store.get(approval_id)["status"] == "executed"
+
+    replay = client.post(
+        "/api/tools/call",
+        headers={"Authorization": f"Bearer {maker_token}"},
+        json={"tool_name": "restart_vm", "task_id": task_id, "params": params},
+    ).json()
+    assert not replay["success"]
+    assert replay["error_code"] == "APPROVAL_REQUIRED"
 
 
 def test_mcp_call_injects_configured_identity(monkeypatch):
@@ -118,6 +153,31 @@ def test_mcp_call_injects_configured_identity(monkeypatch):
     assert result["success"]
     records = memory_db.list_tool_audit(20, "tenant-mcp")
     assert any(record["user_id"] == "mcp-audited-user" for record in records)
+
+
+def test_mcp_write_uses_caller_supplied_approved_task_id(monkeypatch):
+    task_id = f"mcp-write-{uuid4()}"
+    params = {
+        "vm_id": "vm-1033",
+        "reason": "approved MCP restart test",
+        "change_ticket_id": "DEMO-MCP",
+    }
+    monkeypatch.setenv("MCP_CALLER_USER_ID", "mcp-ops")
+    monkeypatch.setenv("MCP_CALLER_ROLES", "ops")
+    monkeypatch.setenv("MCP_CALLER_TENANT_ID", "tenant-mcp-write")
+    created = _call(
+        "create_approval_request",
+        {
+            "title": "MCP restart approval",
+            "description": "verify MCP approved write path",
+            "tool_calls": [{"tool_name": "restart_vm", "params": params}],
+        },
+        task_id,
+    )
+    assert created["success"]
+    approval_store.decide(created["data"]["id"], True, "mcp-admin", "approved")
+    executed = _call("restart_vm", params, task_id)
+    assert executed["success"]
 
 
 def test_audit_api_is_tenant_scoped():

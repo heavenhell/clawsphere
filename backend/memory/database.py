@@ -99,6 +99,7 @@ class MemoryDatabase:
                     description TEXT NOT NULL,
                     tool_calls TEXT NOT NULL,
                     risk TEXT NOT NULL,
+                    resume_required INTEGER NOT NULL DEFAULT 1,
                     status TEXT NOT NULL DEFAULT 'pending',
                     approver TEXT,
                     decision_reason TEXT,
@@ -145,6 +146,13 @@ class MemoryDatabase:
             self._add_column_if_missing(connection, "memory_writes", "tenant_id", "TEXT NOT NULL DEFAULT 'legacy-tenant'")
             self._add_column_if_missing(connection, "execution_logs", "user_id", "TEXT NOT NULL DEFAULT 'legacy-user'")
             self._add_column_if_missing(connection, "execution_logs", "tenant_id", "TEXT NOT NULL DEFAULT 'legacy-tenant'")
+            self._add_column_if_missing(connection, "approvals", "resume_required", "INTEGER NOT NULL DEFAULT 1")
+            connection.execute(
+                """
+                UPDATE approvals SET resume_required = 0
+                WHERE tool_calls = '[]' AND conversation_id = task_id
+                """
+            )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_memory_writes_tenant ON memory_writes(tenant_id, created_at)"
             )
@@ -156,6 +164,7 @@ class MemoryDatabase:
         column: str,
         declaration: str,
     ) -> None:
+        # Identifiers are internal migration constants only; never pass request data here.
         columns = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
         if column not in columns:
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
@@ -227,7 +236,7 @@ class MemoryDatabase:
         conversation_id: str,
         user_id: str,
         tenant_id: str,
-        limit: int = 12,
+        limit: int = 100,
     ) -> tuple[list[dict[str, str]], str]:
         with self.connect() as connection:
             session = connection.execute(
