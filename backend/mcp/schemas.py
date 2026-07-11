@@ -52,6 +52,21 @@ class ApprovalRequestParams(ToolParams):
     risk: str = Field(default="high", pattern=r"^(medium|high)$")
 
 
+class RestartVmParams(VmDetailParams):
+    reason: str = Field(min_length=5, max_length=500)
+    change_ticket_id: str = Field(pattern=r"^(CHG-|DEMO-)[A-Za-z0-9-]+$")
+
+
+class ScaleClusterParams(ClusterCapacityParams):
+    target_hosts: int = Field(ge=1, le=64)
+    reason: str = Field(min_length=5, max_length=500)
+
+
+class ModifyHaPolicyParams(ClusterCapacityParams):
+    policy: dict[str, Any]
+    reason: str = Field(min_length=5, max_length=500)
+
+
 class ToolRequest(BaseModel):
     tool_name: str
     params: dict[str, Any] = Field(default_factory=dict)

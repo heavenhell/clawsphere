@@ -68,6 +68,24 @@ def get_storage_pool_usage(pool_id: str | None = None) -> dict[str, Any]:
     return _call("get_storage_pool_usage", {"pool_id": pool_id})
 
 
+@mcp.tool()
+def restart_vm(vm_id: str, reason: str, change_ticket_id: str) -> dict[str, Any]:
+    """Restart a VM. The gateway requires ops/admin role and prior HITL approval."""
+    return _call("restart_vm", {"vm_id": vm_id, "reason": reason, "change_ticket_id": change_ticket_id})
+
+
+@mcp.tool()
+def scale_cluster(cluster_id: str, target_hosts: int, reason: str) -> dict[str, Any]:
+    """Change cluster host count. The gateway requires admin role and prior HITL approval."""
+    return _call("scale_cluster", {"cluster_id": cluster_id, "target_hosts": target_hosts, "reason": reason})
+
+
+@mcp.tool()
+def modify_ha_policy(cluster_id: str, policy: dict[str, Any], reason: str) -> dict[str, Any]:
+    """Modify cluster HA policy. The gateway requires admin role and prior HITL approval."""
+    return _call("modify_ha_policy", {"cluster_id": cluster_id, "policy": policy, "reason": reason})
+
+
 def main() -> None:
     transport = os.getenv("MCP_TRANSPORT", "stdio")
     mcp.run(transport=transport)

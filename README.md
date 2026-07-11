@@ -62,6 +62,8 @@ Current storage modes:
   `docker compose up -d postgres` 可启动本项目的 pgvector 环境。
 - 检索使用 BM25、128 维哈希向量和 RRF 融合，先做租户与密级过滤。
 - 对话保留最近 6 轮，旧内容压缩为滚动摘要，并持久化到本地数据库。
+- LangGraph checkpoint 默认使用 SQLite；设置 `DCS_CHECKPOINT_BACKEND=postgres`
+  后使用 PostgresSaver，支持 HITL 跨进程恢复。
 - Langfuse and Prometheus are not connected to external services yet.
 
 ## MCP Server
@@ -75,3 +77,10 @@ python -m backend.mcp.mcp_server
 设置 `MCP_TRANSPORT=streamable-http` 可切换为 Streamable HTTP。FastAPI 网关的
 `/api/tools/call` 同时支持 JWT Bearer 身份，开发环境可通过 `/api/auth/demo-token`
 获取演示令牌。
+
+## HITL approval
+
+ops/admin 发起重启、扩容或 HA 修改后，LangGraph 在工具执行前 `interrupt`。
+审批项可从 `GET /api/approvals` 查询，并通过
+`POST /api/approvals/{approval_id}/decision` 批准或拒绝；高风险操作必须由
+admin 令牌审批。批准后使用原 conversation id 从 checkpoint 恢复，拒绝时不会调用写工具。

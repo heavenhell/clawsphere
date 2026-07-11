@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from backend.agent.copilot import run_copilot
+from backend.agent.copilot import resume_copilot, run_copilot
+from backend.guardrails.approvals import approval_store
 from backend.mcp.auth import AuthContext, get_auth_context, issue_demo_token
 from backend.memory.store import list_memory_writes
+from backend.memory.database import memory_db
 from backend.mcp.schemas import ToolRequest
-from backend.mcp.tools import APPROVAL_QUEUE, AUDIT_LOG, TOOL_REGISTRY, call_tool
+from backend.mcp.tools import TOOL_REGISTRY, call_tool
 from backend.mock.repository import repo
 from backend.mock.api import router as mock_router
 
@@ -25,6 +27,11 @@ class DemoTokenRequest(BaseModel):
     user_id: str = "demo-user"
     roles: list[str] = Field(default_factory=lambda: ["readonly"])
     tenant_id: str = "demo-tenant"
+
+
+class ApprovalDecisionRequest(BaseModel):
+    approved: bool
+    reason: str = ""
 
 
 app = FastAPI(title="DCS Copilot Demo")
@@ -93,12 +100,37 @@ def chat(request: ChatRequest, auth: AuthContext = Depends(get_auth_context)):
 
 @app.get("/api/audit")
 def audit():
-    return AUDIT_LOG[-50:]
+    return memory_db.list_tool_audit(50)
 
 
 @app.get("/api/approvals")
-def approvals():
-    return APPROVAL_QUEUE
+def approvals(auth: AuthContext = Depends(get_auth_context)):
+    if not set(auth.roles) & {"ops", "admin"}:
+        return []
+    return approval_store.list()
+
+
+@app.post("/api/approvals/{approval_id}/decision")
+def decide_approval(
+    approval_id: str,
+    request: ApprovalDecisionRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
+    if not set(auth.roles) & {"ops", "admin"}:
+        raise HTTPException(status_code=403, detail="当前角色无权审批变更")
+    approval = approval_store.get(approval_id)
+    if not approval:
+        raise HTTPException(status_code=404, detail="审批项不存在")
+    if approval["status"] != "pending":
+        raise HTTPException(status_code=409, detail="审批项已处理")
+    if approval["risk"] == "high" and "admin" not in auth.roles:
+        raise HTTPException(status_code=403, detail="高风险变更必须由 admin 审批")
+    return resume_copilot(
+        approval["conversation_id"],
+        request.approved,
+        auth.user_id,
+        request.reason,
+    )
 
 
 @app.get("/api/memory")

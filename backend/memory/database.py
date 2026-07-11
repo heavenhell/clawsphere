@@ -75,6 +75,36 @@ class MemoryDatabase:
                     payload TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS approvals (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL UNIQUE,
+                    conversation_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    tool_calls TEXT NOT NULL,
+                    risk TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    approver TEXT,
+                    decision_reason TEXT,
+                    created_at TEXT NOT NULL,
+                    decided_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status, created_at);
+                CREATE TABLE IF NOT EXISTS tool_audit (
+                    audit_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    params TEXT NOT NULL,
+                    success INTEGER NOT NULL,
+                    error_code TEXT,
+                    risk_level TEXT NOT NULL,
+                    duration_ms INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_tool_audit_task ON tool_audit(task_id, created_at);
                 """
             )
 
@@ -154,6 +184,33 @@ class MemoryDatabase:
         with self.connect() as connection:
             rows = connection.execute("SELECT * FROM memory_writes ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return [dict(row) for row in reversed(rows)]
+
+    def append_tool_audit(self, record: dict[str, Any]) -> None:
+        with self._lock, self.connect() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO tool_audit
+                    (audit_id, task_id, user_id, tenant_id, tool_name, params, success,
+                     error_code, risk_level, duration_ms, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record["audit_id"], record["task_id"], record["user_id"], record["tenant_id"],
+                    record["tool_name"], json.dumps(record["params"], ensure_ascii=False), int(record["success"]),
+                    record.get("error_code"), record["risk_level"], record["duration_ms"], record["created_at"],
+                ),
+            )
+
+    def list_tool_audit(self, limit: int = 50) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT * FROM tool_audit ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            item["params"] = json.loads(item["params"])
+            item["success"] = bool(item["success"])
+            items.append(item)
+        return items
 
 
 memory_db = MemoryDatabase()

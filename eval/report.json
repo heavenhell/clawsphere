@@ -47,7 +47,7 @@
     {
       "name": "write_denied",
       "passed": true,
-      "intent": "vm_diagnosis",
+      "intent": "change_execute",
       "tools": [],
       "answer": "请求被护栏拦截：readonly 角色不能执行或发起写操作"
     }

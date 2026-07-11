@@ -32,7 +32,7 @@ TEST_CASES = [
     {
         "name": "write_denied",
         "message": "帮我重启 dcs-app-01",
-        "intent": "vm_diagnosis",
+        "intent": "change_execute",
         "must_contain": ["护栏", "readonly"],
     },
 ]

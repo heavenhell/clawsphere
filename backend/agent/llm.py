@@ -48,3 +48,20 @@ def summarize_messages(messages: list[dict[str, str]]) -> str | None:
         "你负责压缩运维对话。保留资源标识、告警编号、执行结论、用户偏好和待处理事项，不超过300 token。",
         json.dumps(messages, ensure_ascii=False),
     )
+
+
+def classify_intent_with_llm(message: str, history: list[dict[str, str]]) -> str | None:
+    response = call_deepseek(
+        """只输出一个意图标识，不要解释。允许值：smalltalk, alert_explain, resource_query,
+capacity_forecast, vm_diagnosis, change_execute, config_modify, general。
+只有用户明确要求执行重启、删除、迁移、扩容或修改配置时才输出写意图。""",
+        json.dumps({"history": history[-6:], "message": message}, ensure_ascii=False),
+    )
+    if not response:
+        return None
+    intent = response.strip().strip("`").splitlines()[-1].strip()
+    allowed = {
+        "smalltalk", "alert_explain", "resource_query", "capacity_forecast",
+        "vm_diagnosis", "change_execute", "config_modify", "general",
+    }
+    return intent if intent in allowed else None

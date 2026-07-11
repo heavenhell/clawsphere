@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from backend.app import app
 from backend.mcp.schemas import ToolRequest
 from backend.mcp.tools import TOOL_REGISTRY, call_tool
+from backend.memory.database import memory_db
 
 
 client = TestClient(app)
@@ -43,3 +44,9 @@ def test_tool_catalog_exposes_json_schema():
     schema = TOOL_REGISTRY["get_vm_metrics"].input_model.model_json_schema()
     assert set(schema["required"]) == {"vm_id"}
     assert "time_range" in schema["properties"]
+
+
+def test_tool_audit_is_persisted():
+    response = call_tool(ToolRequest(tool_name="list_alarms", params={}, task_id="audit-test"))
+    records = memory_db.list_tool_audit(20)
+    assert any(item["audit_id"] == response.audit_id and item["task_id"] == "audit-test" for item in records)

@@ -16,6 +16,9 @@ from backend.mcp.schemas import (
     ClusterCapacityParams,
     EmptyParams,
     ForecastParams,
+    ModifyHaPolicyParams,
+    RestartVmParams,
+    ScaleClusterParams,
     StoragePoolParams,
     ToolParams,
     ToolRequest,
@@ -25,6 +28,7 @@ from backend.mcp.schemas import (
     VmMetricsParams,
 )
 from backend.mock.repository import repo
+from backend.memory.database import memory_db
 
 
 @dataclass(frozen=True)
@@ -40,6 +44,7 @@ class ToolSpec:
 TOOL_REGISTRY: dict[str, ToolSpec] = {}
 AUDIT_LOG: list[dict[str, Any]] = []
 APPROVAL_QUEUE: list[dict[str, Any]] = []
+MOCK_CHANGE_LOG: list[dict[str, Any]] = []
 
 
 def mcp_tool(
@@ -204,6 +209,58 @@ def create_approval_request(title: str, description: str, risk: str = "high"):
     return item
 
 
+@mcp_tool("restart_vm", "重启指定虚拟机", RestartVmParams, risk="high", auth_roles=["ops", "admin"])
+def restart_vm(vm_id: str, reason: str, change_ticket_id: str):
+    vm = next((item for item in repo.vms() if item["id"] == vm_id or item["name"] == vm_id), None)
+    if not vm:
+        raise ValueError("虚拟机不存在")
+    result = {
+        "task_id": f"mock-restart-{len(MOCK_CHANGE_LOG) + 1:04d}",
+        "action": "restart_vm",
+        "resource_id": vm["id"],
+        "resource_name": vm["name"],
+        "change_ticket_id": change_ticket_id,
+        "reason": reason,
+        "status": "completed",
+    }
+    MOCK_CHANGE_LOG.append(result)
+    return result
+
+
+@mcp_tool("scale_cluster", "调整集群目标主机数", ScaleClusterParams, risk="high", auth_roles=["admin"])
+def scale_cluster(cluster_id: str, target_hosts: int, reason: str):
+    cluster = next((item for item in repo.clusters() if item["id"] == cluster_id), None)
+    if not cluster:
+        raise ValueError("集群不存在")
+    result = {
+        "task_id": f"mock-scale-{len(MOCK_CHANGE_LOG) + 1:04d}",
+        "action": "scale_cluster",
+        "resource_id": cluster_id,
+        "previous_hosts": cluster["host_count"],
+        "target_hosts": target_hosts,
+        "reason": reason,
+        "status": "completed",
+    }
+    MOCK_CHANGE_LOG.append(result)
+    return result
+
+
+@mcp_tool("modify_ha_policy", "修改集群 HA 策略", ModifyHaPolicyParams, risk="high", auth_roles=["admin"])
+def modify_ha_policy(cluster_id: str, policy: dict[str, Any], reason: str):
+    if not any(item["id"] == cluster_id for item in repo.clusters()):
+        raise ValueError("集群不存在")
+    result = {
+        "task_id": f"mock-ha-{len(MOCK_CHANGE_LOG) + 1:04d}",
+        "action": "modify_ha_policy",
+        "resource_id": cluster_id,
+        "policy": policy,
+        "reason": reason,
+        "status": "completed",
+    }
+    MOCK_CHANGE_LOG.append(result)
+    return result
+
+
 def call_tool(request: ToolRequest) -> ToolResponse:
     started = perf_counter()
     audit_id = str(uuid4())
@@ -246,16 +303,29 @@ def call_tool(request: ToolRequest) -> ToolResponse:
                 execution_time_ms=int((perf_counter() - started) * 1000),
                 audit_id=audit_id,
             )
-    AUDIT_LOG.append(
-        {
+        except ValueError as exc:
+            response = ToolResponse(
+                tool_name=request.tool_name,
+                success=False,
+                error_code="BUSINESS_VALIDATION_FAILED",
+                error_msg=str(exc),
+                execution_time_ms=int((perf_counter() - started) * 1000),
+                audit_id=audit_id,
+            )
+    audit_record = {
             "audit_id": audit_id,
+            "task_id": request.task_id,
+            "user_id": request.caller_user_id,
+            "tenant_id": request.tenant_id,
             "tool_name": request.tool_name,
             "params": request.params,
             "roles": request.caller_roles,
             "success": response.success,
             "error_code": response.error_code,
+            "risk_level": spec.risk,
             "duration_ms": response.execution_time_ms,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-    )
+    AUDIT_LOG.append(audit_record)
+    memory_db.append_tool_audit(audit_record)
     return response

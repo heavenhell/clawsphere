@@ -6,11 +6,14 @@ from typing import Any, Literal, TypedDict
 from uuid import uuid4
 
 from langgraph.graph import END, StateGraph
+from langgraph.types import Command, interrupt
 
-from backend.agent.llm import call_deepseek, summarize_messages
-from backend.guardrails.policy import detect_write_intent, validate_tool_calls
+from backend.agent.llm import call_deepseek, classify_intent_with_llm, summarize_messages
+from backend.agent.checkpoint import CHECKPOINTER
+from backend.guardrails.approvals import approval_store
+from backend.guardrails.policy import detect_write_intent, record_tool_execution, validate_tool_calls
 from backend.mcp.schemas import ToolRequest
-from backend.mcp.tools import APPROVAL_QUEUE, call_tool
+from backend.mcp.tools import call_tool
 from backend.memory.context_manager import deterministic_summary, manage_context_window
 from backend.memory.database import memory_db
 from backend.memory.retriever import retrieve, retrieve_history, retrieve_skill_detail
@@ -61,6 +64,8 @@ def classify_intent(message: str) -> str:
     stripped = message.strip()
     if stripped.lower() in {"hi", "hello"} or stripped in {"你好", "您好", "嗨", "在吗", "谢谢", "感谢", "辛苦了"}:
         return "smalltalk"
+    if detect_write_intent(message):
+        return "change_execute"
     if _contains(message, ["第一条", "第二条", "第三条", "上一条", "下一条", "这条", "那条", "它呢"]):
         return "alert_explain"
     if _contains(message, ["告警", "报警", "alarm"]):
@@ -71,8 +76,6 @@ def classify_intent(message: str) -> str:
         return "vm_diagnosis"
     if _contains(message, ["虚拟机", "云服务器", "VM", "vm", "主机", "集群", "数据存储", "存储", "资源", "资产", "环境", "概览", "总览", "平台情况", "有哪些", "有多少", "列表"]):
         return "resource_query"
-    if detect_write_intent(message):
-        return "change_execute"
     return "general"
 
 
@@ -152,12 +155,34 @@ def plan_tools(intent: str, message: str, history: list[dict[str, str]]) -> list
             {"tool_name": "list_vms", "params": {}},
         ]
     if intent == "change_execute":
-        return [{"tool_name": "create_approval_request", "params": {"title": "高风险变更请求", "description": message, "risk": "high"}}]
+        if "重启" in message:
+            return [{
+                "tool_name": "restart_vm",
+                "params": {"vm_id": extract_vm_id(message), "reason": message, "change_ticket_id": "DEMO-AUTO"},
+            }]
+        if "扩容" in message or "扩缩容" in message:
+            cluster_id = extract_cluster_id(message)
+            count = re.search(r"(?:到|至|为)\s*(\d+)\s*台", message)
+            current = next((cluster["host_count"] for cluster in call_tool(ToolRequest(tool_name="list_clusters", params={})).data if cluster["id"] == cluster_id), 1)
+            target_hosts = int(count.group(1)) if count else current + 1
+            return [{"tool_name": "scale_cluster", "params": {"cluster_id": cluster_id, "target_hosts": target_hosts, "reason": message}}]
+        if "HA" in message.upper() or "策略" in message:
+            return [{
+                "tool_name": "modify_ha_policy",
+                "params": {"cluster_id": extract_cluster_id(message), "policy": {"enabled": True}, "reason": message},
+            }]
+        return []
     return []
 
 
 def intent_classifier(state: CopilotState) -> CopilotState:
-    return {"intent": classify_intent(state["message"])}
+    intent = classify_intent(state["message"])
+    if intent == "general":
+        try:
+            intent = classify_intent_with_llm(state["message"], state.get("messages", [])) or intent
+        except Exception:
+            pass
+    return {"intent": intent}
 
 
 def context_loader(state: CopilotState) -> CopilotState:
@@ -218,15 +243,32 @@ def guardrail(state: CopilotState) -> CopilotState:
 
 
 def hitl_interrupt(state: CopilotState) -> CopilotState:
-    item = {
-        "id": f"approval-{len(APPROVAL_QUEUE) + 1:04d}",
-        "title": "待审批变更",
-        "description": state["message"],
-        "risk": "high",
-        "status": "pending",
+    item = approval_store.create_or_get(
+        state["task_id"],
+        state["conversation_id"],
+        state["user_id"],
+        state["tenant_id"],
+        state["message"],
+        state.get("tool_calls_proposed", []),
+        "high",
+    )
+    decision = interrupt({
+        "approval_id": item["id"],
+        "description": item["description"],
+        "tool_calls": item["tool_calls"],
+        "risk": item["risk"],
+    })
+    approved = bool(decision.get("approved")) if isinstance(decision, dict) else bool(decision)
+    approver = decision.get("approver", "unknown") if isinstance(decision, dict) else "unknown"
+    reason = decision.get("reason", "") if isinstance(decision, dict) else ""
+    approval_store.decide(item["id"], approved, approver, reason)
+    if approved:
+        return {"hitl_approved": True}
+    return {
+        "hitl_approved": False,
+        "tool_calls_proposed": [],
+        "final_response": f"审批 {item['id']} 已拒绝，变更未执行。",
     }
-    APPROVAL_QUEUE.append(item)
-    return {"hitl_approved": False, "final_response": f"该操作需要人工审批，已进入审批队列：{item['id']}。"}
 
 
 def tool_executor(state: CopilotState) -> CopilotState:
@@ -243,6 +285,8 @@ def tool_executor(state: CopilotState) -> CopilotState:
         ))
         result = response.model_dump()
         results.append(result)
+        if response.success:
+            record_tool_execution(call["tool_name"], call["params"])
         execution_log.append({"tool_name": call["tool_name"], "success": response.success, "audit_id": response.audit_id})
     return {"tool_results": results, "execution_log": execution_log}
 
@@ -304,7 +348,11 @@ def deterministic_response(state: CopilotState) -> str:
             return f"当前共有 {len(datastores)} 个数据存储。\n\n{lines}"
         return f"资源盘点：站点 {len(resource.get('sites', []))} 个，集群 {overview.get('cluster_count')} 个，主机 {overview.get('host_count')} 台，VM {overview.get('vm_count')} 台，数据存储 {overview.get('datastore_count')} 个，活跃告警 {overview.get('active_alarm_count')} 条。"
     if intent == "change_execute":
-        return "该请求涉及写操作，已按护栏要求进入审批流程，demo 环境不会直接执行变更。"
+        completed = [item for item in state.get("tool_results", []) if item.get("success")]
+        if completed:
+            result = completed[-1].get("data") or {}
+            return f"变更已获批准并执行完成。任务 {result.get('task_id')}，动作 {result.get('action')}，对象 {result.get('resource_name') or result.get('resource_id')}，状态 {result.get('status')}。"
+        return "该请求涉及写操作，已按护栏要求进入审批流程，审批前不会执行变更。"
     return "我在。你可以问资源、告警、容量预测、VM 性能诊断，也可以继续追问上一轮结果。"
 
 
@@ -355,6 +403,10 @@ def route_after_guardrail(state: CopilotState) -> Literal["hitl_interrupt", "too
     return "response_generator"
 
 
+def route_after_hitl(state: CopilotState) -> Literal["tool_executor", "response_generator"]:
+    return "tool_executor" if state.get("hitl_approved") else "response_generator"
+
+
 def build_graph():
     builder = StateGraph(CopilotState)
     for name, fn in [
@@ -376,14 +428,37 @@ def build_graph():
     builder.add_edge("memory_retriever", "planner")
     builder.add_edge("planner", "guardrail")
     builder.add_conditional_edges("guardrail", route_after_guardrail)
-    builder.add_edge("hitl_interrupt", "response_generator")
+    builder.add_conditional_edges("hitl_interrupt", route_after_hitl)
     builder.add_edge("tool_executor", "response_generator")
     builder.add_edge("response_generator", "memory_writer")
     builder.add_edge("memory_writer", END)
-    return builder.compile()
+    return builder.compile(checkpointer=CHECKPOINTER)
 
 
 GRAPH = build_graph()
+
+
+def _format_result(state: dict[str, Any], conversation_id: str) -> dict[str, Any]:
+    interrupts = state.get("__interrupt__", [])
+    approval_payload = interrupts[0].value if interrupts else None
+    answer = state.get("final_response")
+    if approval_payload:
+        answer = f"该操作需要人工审批，已暂停执行并进入审批队列：{approval_payload['approval_id']}。"
+    return {
+        "conversation_id": conversation_id,
+        "intent": state.get("intent"),
+        "answer": answer,
+        "tool_calls": state.get("tool_calls_proposed", []),
+        "tool_results": state.get("tool_results", []),
+        "blocked_reason": state.get("error"),
+        "plan": state.get("plan", []),
+        "retrieved_docs": state.get("retrieved_docs", []),
+        "retrieved_history": state.get("retrieved_history", []),
+        "summary": state.get("conversation_summary", ""),
+        "memory_summary": state.get("summary", ""),
+        "hitl_required": bool(approval_payload) or state.get("hitl_required", False),
+        "approval": approval_payload,
+    }
 
 
 def run_copilot(
@@ -401,10 +476,12 @@ def run_copilot(
         stored_messages, stored_summary = memory_db.load_conversation(conversation_id)
         messages = stored_messages
         summary = summary or stored_summary
+    task_id = str(uuid4())
+    config = {"configurable": {"thread_id": conversation_id}}
     state = GRAPH.invoke({
         "messages": messages,
         "message": message,
-        "task_id": "demo-task",
+        "task_id": task_id,
         "conversation_id": conversation_id,
         "user_id": user_id,
         "user_roles": roles or ["readonly"],
@@ -415,16 +492,14 @@ def run_copilot(
         "hitl_required": False,
         "hitl_approved": None,
         "error": None,
-    })
-    return {
-        "intent": state.get("intent"),
-        "answer": state.get("final_response"),
-        "tool_calls": state.get("tool_calls_proposed", []),
-        "tool_results": state.get("tool_results", []),
-        "blocked_reason": state.get("error"),
-        "plan": state.get("plan", []),
-        "retrieved_docs": state.get("retrieved_docs", []),
-        "summary": state.get("conversation_summary", ""),
-        "memory_summary": state.get("summary", ""),
-        "hitl_required": state.get("hitl_required", False),
-    }
+    }, config=config)
+    return _format_result(state, conversation_id)
+
+
+def resume_copilot(conversation_id: str, approved: bool, approver: str, reason: str = "") -> dict[str, Any]:
+    config = {"configurable": {"thread_id": conversation_id}}
+    state = GRAPH.invoke(
+        Command(resume={"approved": approved, "approver": approver, "reason": reason}),
+        config=config,
+    )
+    return _format_result(state, conversation_id)
