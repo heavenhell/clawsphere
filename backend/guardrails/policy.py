@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from backend.mcp.tools import TOOL_REGISTRY
 from backend.memory.database import memory_db
-from backend.mock.repository import repo
+from backend.providers import repo
 
 
 WRITE_HINTS = ["重启", "停止", "删除", "迁移", "扩容", "修改", "启用", "禁用", "执行", "处理掉"]

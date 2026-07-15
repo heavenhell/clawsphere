@@ -25,6 +25,9 @@ def test_mock_scenario_has_normal_and_abnormal_resources():
     assert len(client.get("/mock/fusioncompute/vms").json()) == 5
     assert len(client.get("/mock/fusioncompute/alarms").json()) == 5
     assert len(client.get("/mock/dorado/storage-pools").json()) == 3
+    status = client.get("/api/platform-status").json()
+    assert status["fusioncompute"] == "mock"
+    assert status["edme"] == "mock"
 
 
 def test_edme_mock_requires_session_and_exposes_operations_apis():

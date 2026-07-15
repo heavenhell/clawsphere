@@ -1,0 +1,20 @@
+{
+  "fusioncompute": {
+    "ip": "",
+    "username": "",
+    "password": "",
+    "session": ""
+  },
+  "edme": {
+    "ip": "",
+    "username": "",
+    "password": "",
+    "session": ""
+  },
+  "mcp": {
+    "enabled": true,
+    "transport": "streamable-http",
+    "host": "127.0.0.1",
+    "port": 8020
+  }
+}

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 from uuid import uuid4
 
@@ -9,11 +8,15 @@ from mcp.server.fastmcp import FastMCP
 from backend.mcp.schemas import ToolRequest
 from backend.mcp.tools import call_tool
 from backend.mcp.auth import get_mcp_auth_context
+from backend.providers import runtime_config
 
 
 mcp = FastMCP(
     "ClawSphere DCS Operations",
     instructions="FusionCompute, Dorado and eDME operations tools with RBAC and audit logging.",
+    host=runtime_config.mcp.host,
+    port=runtime_config.mcp.port,
+    streamable_http_path="/mcp",
 )
 
 
@@ -152,8 +155,7 @@ def modify_ha_policy(task_id: str, cluster_id: str, policy: dict[str, Any], reas
 
 
 def main() -> None:
-    transport = os.getenv("MCP_TRANSPORT", "stdio")
-    mcp.run(transport=transport)
+    mcp.run(transport=runtime_config.mcp.transport)
 
 
 if __name__ == "__main__":

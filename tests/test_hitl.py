@@ -6,7 +6,7 @@ from backend.guardrails.approvals import approval_store
 from backend.guardrails.policy import validate_tool_calls
 from backend.memory.database import memory_db
 from backend.mcp.tools import TOOL_REGISTRY
-from backend.mock.repository import repo
+from backend.providers import repo
 
 
 def _clear_rate_events(resource_id: str):

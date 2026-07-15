@@ -46,6 +46,8 @@ pip install -r requirements-observability.txt
 
 ## Configuration
 
+真实平台统一配置位于 `config/platforms.json`，支持 IP + 账号密码或 IP + Session。详细说明见 `docs/real-platform-config.md`。
+
 复制 `.env.example` 为 `.env` 并按环境填写。
 
 - `DEMO_MODE=true`：开放匿名 readonly 和 demo-token，仅用于本机演示。

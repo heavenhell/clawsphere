@@ -42,6 +42,7 @@ function QueryApp() {
     return value;
   });
   const [overview, setOverview] = useState(null);
+  const [platformStatus, setPlatformStatus] = useState(null);
   const [tools, setTools] = useState([]);
   const [audit, setAudit] = useState([]);
   const [approvals, setApprovals] = useState([]);
@@ -49,7 +50,7 @@ function QueryApp() {
     {
       id: crypto.randomUUID(),
       role: 'assistant',
-      content: '我已接入 FusionCompute mock 环境，可以演示告警解释、容量预测和 VM 性能诊断。',
+      content: '我已接入运维平台，可以查询资源、解释告警、预测容量和诊断 VM 性能。',
     },
   ]);
   const [input, setInput] = useState('');
@@ -58,13 +59,15 @@ function QueryApp() {
   const listRef = useRef(null);
 
   const refreshSideData = async () => {
-    const [overviewRes, toolsRes, auditRes, approvalRes] = await Promise.all([
+    const [overviewRes, platformRes, toolsRes, auditRes, approvalRes] = await Promise.all([
       fetch(`${API_BASE}/api/overview`),
+      fetch(`${API_BASE}/api/platform-status`),
       fetch(`${API_BASE}/api/tools`),
       fetch(`${API_BASE}/api/audit`),
       fetch(`${API_BASE}/api/approvals`),
     ]);
     setOverview(await overviewRes.json());
+    setPlatformStatus(await platformRes.json());
     setTools(await toolsRes.json());
     setAudit(await auditRes.json());
     setApprovals(await approvalRes.json());
@@ -115,6 +118,13 @@ function QueryApp() {
     return overview.capacity_risks.some((item) => item.free_gb / item.capacity_gb < 0.1) ? '高' : '中';
   }, [overview]);
 
+  const platformLabel = useMemo(() => {
+    if (platformStatus?.fusioncompute === 'real' && platformStatus?.edme === 'real') return 'FC + eDME real';
+    if (platformStatus?.fusioncompute === 'real') return 'FusionCompute real';
+    if (platformStatus?.edme === 'real') return 'eDME real';
+    return 'mock online';
+  }, [platformStatus]);
+
   return (
     <main className="shell">
       <section className="leftPane">
@@ -158,7 +168,7 @@ function QueryApp() {
             <h2>运维问答</h2>
             <p>只读演示链路，写操作会被护栏拦截</p>
           </div>
-          <span className="live"><CheckCircle2 size={14} /> mock online</span>
+          <span className="live"><CheckCircle2 size={14} /> {platformLabel}</span>
         </div>
 
         <div className="exampleBar">

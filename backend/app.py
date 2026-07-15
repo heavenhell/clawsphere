@@ -15,8 +15,8 @@ from backend.memory.store import list_memory_writes
 from backend.memory.database import memory_db
 from backend.mcp.schemas import GatewayToolRequest, ToolRequest
 from backend.mcp.tools import TOOL_REGISTRY, call_tool
-from backend.mock.repository import repo
 from backend.mock.api import router as mock_router
+from backend.providers import repo, runtime_config
 from backend.observability import APPROVAL_DECISIONS, HTTP_LATENCY, HTTP_REQUESTS, INTENT_COUNT, create_metrics_app
 from backend.memory.retriever import ensure_knowledge_seeded
 
@@ -64,7 +64,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.include_router(mock_router)
+if runtime_config.expose_mock_api:
+    app.include_router(mock_router)
 metrics_app = create_metrics_app()
 if metrics_app is not None:
     app.mount("/metrics", metrics_app)
@@ -93,6 +94,11 @@ def health():
 @app.get("/api/overview")
 def overview():
     return repo.overview()
+
+
+@app.get("/api/platform-status")
+def platform_status():
+    return repo.platform_status()
 
 
 @app.get("/api/tools")

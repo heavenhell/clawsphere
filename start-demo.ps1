@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
-$Pnpm = "C:\Users\chen\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\pnpm.cmd"
+$Pnpm = "C:\Users\chen\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\fallback\pnpm.cmd"
 
 $env:PYTHONPATH = $Root
 
@@ -20,6 +20,23 @@ Start-Process -FilePath $Pnpm `
   -RedirectStandardOutput (Join-Path $Root "frontend.out.log") `
   -RedirectStandardError (Join-Path $Root "frontend.err.log")
 
+$PlatformConfigPath = Join-Path $Root "config\platforms.json"
+$PlatformConfig = $null
+if (Test-Path -LiteralPath $PlatformConfigPath) {
+  $PlatformConfig = Get-Content -LiteralPath $PlatformConfigPath -Raw | ConvertFrom-Json
+  if ($PlatformConfig.mcp.enabled) {
+    Start-Process -FilePath $Python `
+      -ArgumentList @("-m", "backend.mcp.mcp_server") `
+      -WorkingDirectory $Root `
+      -WindowStyle Hidden `
+      -RedirectStandardOutput (Join-Path $Root "mcp.out.log") `
+      -RedirectStandardError (Join-Path $Root "mcp.err.log")
+  }
+}
+
 Write-Host "DCS Copilot Demo started:"
 Write-Host "Backend:  http://127.0.0.1:8010"
 Write-Host "Frontend: http://127.0.0.1:5174"
+if ($PlatformConfig -and $PlatformConfig.mcp.enabled) {
+  Write-Host "MCP:      http://$($PlatformConfig.mcp.host):$($PlatformConfig.mcp.port)/mcp"
+}

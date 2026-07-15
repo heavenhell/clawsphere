@@ -19,7 +19,7 @@ from backend.memory.context_manager import deterministic_summary, manage_context
 from backend.memory.database import memory_db
 from backend.memory.retriever import retrieve, retrieve_history, retrieve_skill_detail
 from backend.memory.store import write_conversation_summary
-from backend.mock.repository import repo
+from backend.providers import repo
 from backend.skills.loader import startup_skill_summaries
 from backend.observability import observe_agent
 
