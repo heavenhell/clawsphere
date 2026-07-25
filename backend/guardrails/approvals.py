@@ -27,7 +27,7 @@ class ApprovalStore:
                 raise ValueError("task id already exists with a different approval payload")
             return existing
         now = datetime.now(timezone.utc).isoformat()
-        approval_id = f"approval-{task_id[-8:]}"
+        approval_id = f"approval-{task_id}"
         with memory_db.connect() as connection:
             connection.execute(
                 """
@@ -46,6 +46,25 @@ class ApprovalStore:
     def get_by_task(self, task_id: str) -> dict[str, Any] | None:
         with memory_db.connect() as connection:
             row = connection.execute("SELECT * FROM approvals WHERE task_id = ?", (task_id,)).fetchone()
+        return self._decode(row) if row else None
+
+    def get_pending_for_conversation(
+        self,
+        conversation_id: str,
+        user_id: str,
+        tenant_id: str,
+    ) -> dict[str, Any] | None:
+        with memory_db.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM approvals
+                WHERE conversation_id = ? AND user_id = ? AND tenant_id = ?
+                  AND status = 'pending' AND resume_required = 1
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                (conversation_id, user_id, tenant_id),
+            ).fetchone()
         return self._decode(row) if row else None
 
     def get(self, approval_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:

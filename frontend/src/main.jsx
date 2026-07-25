@@ -43,6 +43,7 @@ function QueryApp() {
   });
   const [overview, setOverview] = useState(null);
   const [platformStatus, setPlatformStatus] = useState(null);
+  const [llmStatus, setLlmStatus] = useState(null);
   const [tools, setTools] = useState([]);
   const [audit, setAudit] = useState([]);
   const [approvals, setApprovals] = useState([]);
@@ -50,7 +51,7 @@ function QueryApp() {
     {
       id: crypto.randomUUID(),
       role: 'assistant',
-      content: '我已接入运维平台，可以查询资源、解释告警、预测容量和诊断 VM 性能。',
+      content: '我是 ClawSphere DCS 运维智能体（DCS Copilot）。我已接入运维平台，可以查询资源、解释告警、预测容量和诊断 VM 性能。',
     },
   ]);
   const [input, setInput] = useState('');
@@ -59,15 +60,17 @@ function QueryApp() {
   const listRef = useRef(null);
 
   const refreshSideData = async () => {
-    const [overviewRes, platformRes, toolsRes, auditRes, approvalRes] = await Promise.all([
+    const [overviewRes, platformRes, llmRes, toolsRes, auditRes, approvalRes] = await Promise.all([
       fetch(`${API_BASE}/api/overview`),
       fetch(`${API_BASE}/api/platform-status`),
+      fetch(`${API_BASE}/api/llm-status`),
       fetch(`${API_BASE}/api/tools`),
       fetch(`${API_BASE}/api/audit`),
       fetch(`${API_BASE}/api/approvals`),
     ]);
     setOverview(await overviewRes.json());
     setPlatformStatus(await platformRes.json());
+    setLlmStatus(await llmRes.json());
     setTools(await toolsRes.json());
     setAudit(await auditRes.json());
     setApprovals(await approvalRes.json());
@@ -97,7 +100,11 @@ function QueryApp() {
         }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || `请求失败（HTTP ${res.status}）`);
+      }
       setLastTrace(data);
+      if (data.llm_status) setLlmStatus(data.llm_status);
       setMessages((items) => {
         const next = [...items, { id: crypto.randomUUID(), role: 'assistant', content: data.answer }];
         return next.slice(-12);
@@ -124,6 +131,21 @@ function QueryApp() {
     if (platformStatus?.edme === 'real') return 'eDME real';
     return 'mock online';
   }, [platformStatus]);
+
+  const llmState = lastTrace?.llm_status || llmStatus;
+  const llmStateLabel = {
+    healthy: 'LLM 正常',
+    degraded: 'LLM 已降级',
+    misconfigured: 'LLM 配置错误',
+    not_configured: 'LLM 未配置',
+    unknown: 'LLM 待检测',
+  }[llmState?.status] || 'LLM 待检测';
+  const responseSourceLabel = {
+    deepseek: 'DeepSeek',
+    deterministic: '确定性策略',
+    pending: '等待审批',
+    error: '处理失败',
+  }[lastTrace?.response_source] || '未知';
 
   return (
     <main className="shell">
@@ -168,7 +190,12 @@ function QueryApp() {
             <h2>运维问答</h2>
             <p>只读演示链路，写操作会被护栏拦截</p>
           </div>
-          <span className="live"><CheckCircle2 size={14} /> {platformLabel}</span>
+          <div className="runtimeBadges">
+            <span className="live"><CheckCircle2 size={14} /> {platformLabel}</span>
+            <span className={`llmBadge ${llmState?.status || 'unknown'}`}>
+              {llmStateLabel} · {llmState?.model || '-'}
+            </span>
+          </div>
         </div>
 
         <div className="exampleBar">
@@ -205,6 +232,18 @@ function QueryApp() {
       <section className="rightPane">
         <section className="panel tracePanel">
           <h2><TerminalSquare size={16} />工具调用轨迹</h2>
+          {lastTrace ? (
+            <div className="runtimeTrace">
+              <span>回答来源</span>
+              <strong>{responseSourceLabel}</strong>
+              <small>
+                上下文 v{lastTrace.context?.schema_version || '-'}
+                {' · '}历史 {lastTrace.context?.estimated_tokens ?? '-'} tokens
+                {' · '}{lastTrace.context?.relevant_message_count ?? 0} 条相关历史
+                {lastTrace.fallback_reason ? ` · ${lastTrace.fallback_reason}` : ''}
+              </small>
+            </div>
+          ) : null}
           {lastTrace?.plan?.length ? (
             <div className="planBox">
               {lastTrace.plan.map((step) => <span key={step}>{step}</span>)}

@@ -3,12 +3,17 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
+import json
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 import backend.agent.copilot as copilot
+import backend.agent.llm as llm
+from backend.guardrails.chat_limits import ChatLimiter
 from backend.app import app
 from backend.guardrails.approvals import approval_store
 from backend.mcp.mcp_server import _call
@@ -18,6 +23,272 @@ from backend.memory.database import memory_db
 
 
 client = TestClient(app)
+
+
+def test_chat_limiter_enforces_concurrency_and_rate_per_identity():
+    now = [100.0]
+    limiter = ChatLimiter(
+        per_minute=2,
+        burst_per_10_seconds=2,
+        concurrent_per_user=1,
+        concurrent_global=2,
+        clock=lambda: now[0],
+    )
+
+    first = limiter.try_acquire("user-a", "tenant-a")
+    assert first is not None
+    assert limiter.try_acquire("user-a", "tenant-a") is None
+    other = limiter.try_acquire("user-b", "tenant-a")
+    assert other is not None
+    first.release()
+    other.release()
+
+    second = limiter.try_acquire("user-a", "tenant-a")
+    assert second is not None
+    second.release()
+    assert limiter.try_acquire("user-a", "tenant-a") is None
+
+
+@pytest.mark.parametrize(
+    "unsafe_url",
+    [
+        "http://api.deepseek.com/chat/completions",
+        "https://attacker.example/chat/completions",
+        "https://api.deepseek.com:8443/chat/completions",
+    ],
+)
+def test_deepseek_rejects_unsafe_endpoint_before_sending_key(monkeypatch, unsafe_url):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-secret")
+    monkeypatch.delenv("DEEPSEEK_ALLOW_CUSTOM_ENDPOINT", raising=False)
+    monkeypatch.setattr(llm, "DEEPSEEK_URL", unsafe_url)
+
+    class NoNetworkClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("network client must not receive credentials")
+
+    monkeypatch.setattr(llm.httpx, "Client", NoNetworkClient)
+
+    with pytest.raises(ValueError, match="DeepSeek API URL"):
+        llm._invoke({
+            "model": "deepseek-v4-pro",
+            "messages": [{"role": "user", "content": "ping"}],
+        })
+
+
+def test_llm_request_status_is_isolated_between_threads():
+    barrier = threading.Barrier(2)
+
+    def worker(status):
+        llm._record_status(status)
+        barrier.wait()
+        return llm.get_llm_status()["status"]
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        healthy = executor.submit(worker, "healthy")
+        degraded = executor.submit(worker, "degraded")
+
+    assert {healthy.result(), degraded.result()} == {"healthy", "degraded"}
+
+
+def test_llm_outbound_payload_redacts_secret_like_values(monkeypatch):
+    captured = {}
+    sentinel = "SENTINEL-SHOULD-NOT-LEAVE"
+    quoted_sentinel = "SENTINEL ALPHA BETA SHOULD NOT LEAVE"
+    escaped_tail = "ESCAPED-SECRET-TAIL-SHOULD-NOT-LEAVE"
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-secret")
+    monkeypatch.setattr(llm, "DEEPSEEK_URL", "https://api.deepseek.com/chat/completions")
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    class CaptureClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, *args, **kwargs):
+            captured.update(kwargs["json"])
+            return FakeResponse()
+
+    monkeypatch.setattr(llm.httpx, "Client", CaptureClient)
+    llm._invoke({
+        "model": "deepseek-v4-pro",
+        "messages": [{
+            "role": "user",
+            "content": (
+                f"password={sentinel}; Authorization: Bearer {sentinel}; "
+                f'{{"accessSession":"{sentinel}","client_secret":"{sentinel}",'
+                f'"refresh_token":"{sentinel}","private_key":"{sentinel}"}}; '
+                f"clientSecret={sentinel}; accessToken={sentinel}; "
+                f"sessionId={sentinel}; privateKey={sentinel}; "
+                f"dbPassword={sentinel}; proxyPassword={sentinel}; "
+                f"jwtSecret={sentinel}; oauthClientSecret={sentinel}; "
+                f"serviceAuthToken={sentinel}; secret_key={sentinel}; "
+                f"secretAccessKey={sentinel}; awsSecretAccessKey={sentinel}; "
+                f"clientSecretValue={sentinel}; accessTokenValue={sentinel}; "
+                f'password="{quoted_sentinel}"; clientSecret=\'{quoted_sentinel}\'; '
+                f"https://example.invalid/callback?accessToken={sentinel}%20encoded&state=123; "
+                f"https://example.invalid/?api_key={sentinel}; "
+                f"https://example.invalid/?secretAccessKey={sentinel}; "
+                f"postgresql://demo:{sentinel}@localhost/database; "
+                f"https://demo:{sentinel}@example.invalid/; "
+                f'{json.dumps({"password": f"alpha \u0022 {escaped_tail}"})}; '
+                f"-----BEGIN PRIVATE KEY-----\n{sentinel}\n-----END PRIVATE KEY-----"
+            ),
+        }],
+        "metadata": {
+            "auth_token": sentinel,
+            "session_id": sentinel,
+            "clientSecret": sentinel,
+            "refreshToken": sentinel,
+            "accessToken": sentinel,
+            "privateKey": sentinel,
+            "secret_key": sentinel,
+            "secretAccessKey": sentinel,
+            "awsSecretAccessKey": sentinel,
+            "clientSecretValue": sentinel,
+            "accessTokenValue": sentinel,
+        },
+    })
+
+    assert sentinel not in json.dumps(captured)
+    assert quoted_sentinel not in json.dumps(captured)
+    assert escaped_tail not in json.dumps(captured)
+
+
+def test_approval_ids_do_not_collide_for_tasks_with_same_suffix():
+    suffix = uuid4().hex[-8:]
+    first = approval_store.create_or_get(
+        f"first-{uuid4()}-{suffix}",
+        f"conversation-{uuid4()}",
+        "collision-user",
+        "collision-tenant",
+        "first",
+        [],
+        "medium",
+        resume_required=False,
+    )
+    second = approval_store.create_or_get(
+        f"second-{uuid4()}-{suffix}",
+        f"conversation-{uuid4()}",
+        "collision-user",
+        "collision-tenant",
+        "second",
+        [],
+        "medium",
+        resume_required=False,
+    )
+
+    assert first["id"] != second["id"]
+
+
+def test_invalid_llm_response_is_degraded_not_healthy(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-secret")
+    monkeypatch.setattr(llm, "DEEPSEEK_URL", "https://api.deepseek.com/chat/completions")
+
+    class InvalidResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {}
+
+    class InvalidClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, *args, **kwargs):
+            return InvalidResponse()
+
+    monkeypatch.setattr(llm.httpx, "Client", InvalidClient)
+
+    with pytest.raises(RuntimeError, match="invalid response"):
+        llm._invoke({
+            "model": "deepseek-v4-pro",
+            "messages": [{"role": "user", "content": "ping"}],
+        })
+
+    assert llm.get_llm_status()["status"] == "degraded"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"content": {"unexpected": "object"}},
+        {"content": "", "tool_calls": []},
+        {"content": None, "tool_calls": [{"function": {"name": 123, "arguments": {}}}]},
+    ],
+)
+def test_unusable_llm_message_schema_is_degraded(monkeypatch, message):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-secret")
+    monkeypatch.setattr(llm, "DEEPSEEK_URL", "https://api.deepseek.com/chat/completions")
+
+    class InvalidResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": message}]}
+
+    class InvalidClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, *args, **kwargs):
+            return InvalidResponse()
+
+    monkeypatch.setattr(llm.httpx, "Client", InvalidClient)
+
+    with pytest.raises(RuntimeError, match="invalid response"):
+        llm._invoke({
+            "model": "deepseek-v4-pro",
+            "messages": [{"role": "user", "content": "ping"}],
+        })
+
+    assert llm.get_llm_status()["status"] == "degraded"
+
+
+def test_oversized_outbound_payload_is_degraded_not_misconfigured(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-secret")
+    monkeypatch.setattr(llm, "DEEPSEEK_URL", "https://api.deepseek.com/chat/completions")
+
+    with pytest.raises(ValueError, match="payload exceeds"):
+        llm._invoke({
+            "model": "deepseek-v4-pro",
+            "messages": [{"role": "user", "content": "ping"}],
+            "tools": [{"description": "x" * (llm.MAX_LLM_PAYLOAD_BYTES + 1)}],
+        })
+
+    status = llm.get_llm_status()
+    assert status["status"] == "degraded"
+    assert status["last_error_class"] == "LLMPayloadTooLargeError"
 
 
 def _token(user_id: str, roles: list[str], tenant_id: str) -> str:
@@ -214,11 +485,15 @@ def test_chat_rejects_client_supplied_history():
     assert response.status_code == 422
 
 
-def test_planning_does_not_write_demo_identity_audit():
+def test_llm_proposed_tools_are_audited_under_the_real_identity(monkeypatch):
+    monkeypatch.setattr(copilot, "call_deepseek_agent_plan", lambda *args, **kwargs: {
+        "tool_calls": [{"tool_name": "list_alarms", "params": {}}],
+        "reason": "model proposal",
+    })
     tenant_id = f"planner-tenant-{uuid4()}"
     user_id = "planner-user"
     copilot.run_copilot(
-        "第二条告警的原因",
+        "现在有哪些告警",
         ["readonly"],
         conversation_id=f"planner-{uuid4()}",
         user_id=user_id,
@@ -259,7 +534,7 @@ def test_approved_tool_must_match_approved_parameters():
 
 
 def test_llm_tool_plan_still_passes_rbac(monkeypatch):
-    monkeypatch.setattr(copilot, "call_deepseek_tool_plan", lambda *args, **kwargs: {
+    monkeypatch.setattr(copilot, "call_deepseek_agent_plan", lambda *args, **kwargs: {
         "tool_calls": [{
             "tool_name": "restart_vm",
             "params": {"vm_id": "vm-1001", "reason": "model planned write", "change_ticket_id": "DEMO-LLM"},
@@ -267,9 +542,25 @@ def test_llm_tool_plan_still_passes_rbac(monkeypatch):
         "reason": "model proposal",
     })
     result = copilot.run_copilot("查询 dcs-app-01 的性能", ["readonly"])
-    assert result["plan_source"] == "deepseek_tool_calling"
+    assert result["plan_source"] == "deepseek_agent"
     assert "无权调用工具" in result["answer"]
     assert not result["tool_results"]
+
+
+def test_step_budget_caps_tool_calls_per_turn(monkeypatch):
+    monkeypatch.setattr(copilot, "call_deepseek_agent_plan", lambda *args, **kwargs: {
+        "tool_calls": [{"tool_name": "list_alarms", "params": {}} for _ in range(50)],
+        "reason": "runaway proposal",
+    })
+    result = copilot.run_copilot(
+        "现在有哪些告警",
+        ["readonly"],
+        conversation_id=f"budget-{uuid4()}",
+        user_id="budget-user",
+        tenant_id=f"budget-tenant-{uuid4()}",
+    )
+    assert result["step_budget_hit"] is True
+    assert len(result["tool_calls"]) <= copilot.MAX_TOOL_CALLS_PER_TURN
 
 
 def test_production_mode_requires_explicit_secret():

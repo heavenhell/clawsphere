@@ -2,9 +2,10 @@ from fastapi.testclient import TestClient
 
 from backend.app import app
 from backend.mcp.schemas import ToolRequest
-from backend.agent.copilot import _response_facts_are_grounded, classify_intent, plan_tools
+from backend.agent.copilot import verify_resource_claims
 from backend.mcp.tools import TOOL_REGISTRY, call_tool
 from backend.memory.database import memory_db
+import backend.app as app_module
 
 
 client = TestClient(app)
@@ -20,6 +21,8 @@ def _tool_request(tool_name: str, params: dict, task_id: str = "gateway-test") -
         tenant_id="gateway-test-tenant",
     )
 
+
+# --- Northbound mocks --------------------------------------------------------
 
 def test_mock_scenario_has_normal_and_abnormal_resources():
     assert len(client.get("/mock/fusioncompute/vms").json()) == 5
@@ -72,36 +75,51 @@ def test_edme_mock_requires_session_and_exposes_operations_apis():
     assert len(history["data"]) == 4
 
 
-def test_edme_agent_routing_and_tools_are_available():
-    assert classify_intent("eDME 现在有哪些存储资源？") == "edme_operations"
-    calls = plan_tools("edme_operations", "查询 eDME 性能指标", [])
-    assert [call["tool_name"] for call in calls] == [
-        "query_edme_resources",
-        "get_edme_metric_catalog",
-        "query_edme_performance_history",
-    ]
-    assert "query_edme_current_alarms" in TOOL_REGISTRY
+# --- Structured-output grounding (verify_resource_claims) --------------------
+# Replaces the old regex grounding. Philosophy: the model self-declares every
+# resource it mentions; code deterministically checks that declaration.
 
-
-def test_edme_resource_names_and_ids_are_grounded():
-    state = {
-        "tool_results": [{
-            "tool_name": "query_edme_resources",
-            "success": True,
-            "data": {
-                "objList": [{
-                    "id": "47FEBD5002AB344D90EC6CFCD6127BA3",
-                    "name": "EDME-Storage-01",
-                }],
-            },
-        }],
-    }
-    assert _response_facts_are_grounded(
-        "EDME-Storage-01 的对象 ID 是 47FEBD5002AB344D90EC6CFCD6127BA3。",
-        state,
+def test_state_assertion_backed_by_tool_result_is_grounded():
+    grounded, _ = verify_resource_claims(
+        "vm-1001 当前 CPU ready 为 6.8%。",
+        [{"id": "vm-1001", "kind": "state_assertion", "from_tool": "get_vm_metrics"}],
+        [{"tool_name": "get_vm_metrics", "success": True, "data": {"vm": {"id": "vm-1001"}}}],
     )
-    assert not _response_facts_are_grounded("EDME-Storage-99 状态正常。", state)
+    assert grounded
 
+
+def test_state_assertion_without_tool_backing_is_rejected():
+    grounded, reason = verify_resource_claims(
+        "vm-8888 当前运行正常。",
+        [{"id": "vm-8888", "kind": "state_assertion", "from_tool": "get_vm_metrics"}],
+        [],
+    )
+    assert not grounded
+    assert "vm-8888" in reason
+
+
+def test_example_reference_is_allowed_without_any_tool_call():
+    # The key new behavior: a term explanation may cite a history object as an
+    # example even though this turn ran no tools.
+    grounded, _ = verify_resource_claims(
+        "热迁移就是把运行中的虚拟机迁走；上一轮提到的 host-005 就是一个例子。",
+        [{"id": "host-005", "kind": "example"}],
+        [],
+    )
+    assert grounded
+
+
+def test_undeclared_resource_in_answer_is_rejected():
+    grounded, reason = verify_resource_claims(
+        "host-005 当前 CPU 95%。",
+        [],
+        [],
+    )
+    assert not grounded
+    assert "host-005" in reason
+
+
+# --- Tool gateway: RBAC / schema / audit -------------------------------------
 
 def test_tool_schema_rejects_invalid_parameters():
     response = call_tool(_tool_request(
@@ -147,3 +165,62 @@ def test_prometheus_metrics_are_exposed():
         "clawsphere_http_requests_total" in response.text
         or "Prometheus metrics are disabled" in response.text
     )
+
+
+# --- LLM-native offline behavior + status redaction --------------------------
+
+def test_chat_offline_prompts_to_connect_llm():
+    response = client.post(
+        "/api/chat",
+        json={"message": "你好", "conversation_id": "offline-prompt-test"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["response_source"] == "unavailable"
+    assert "大模型" in payload["answer"]
+    assert payload["llm_status"]["configured"] is False
+    assert "api_key" not in payload["llm_status"]
+
+
+def test_llm_status_endpoint_is_redacted():
+    response = client.get("/api/llm-status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload) == {"configured", "model", "status"}
+    assert "api_key" not in payload
+
+
+def test_chat_trace_exposes_structured_context_metrics():
+    response = client.post(
+        "/api/chat",
+        json={
+            "message": "诊断 vm-1001 的性能",
+            "conversation_id": "structured-context-test",
+        },
+    )
+    assert response.status_code == 200
+    context = response.json()["context"]
+    assert context["schema_version"] == 2
+    assert context["working_context"]["active_resource_ids"] == ["vm-1001"]
+    assert context["estimated_tokens"] <= 3000
+
+
+def test_chat_rejects_oversized_message_before_agent_execution():
+    response = client.post(
+        "/api/chat",
+        json={"message": "告警" * 4001},
+    )
+    assert response.status_code == 422
+
+
+def test_chat_rate_limit_returns_429_before_agent_execution(monkeypatch):
+    class DeniedLimiter:
+        def try_acquire(self, user_id, tenant_id):
+            return None
+
+    monkeypatch.setattr(app_module, "chat_limiter", DeniedLimiter(), raising=False)
+    response = client.post(
+        "/api/chat",
+        json={"message": "查询资源"},
+    )
+    assert response.status_code == 429
