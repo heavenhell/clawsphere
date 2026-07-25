@@ -17,12 +17,19 @@ flowchart LR
     MCP --> AUDIT[Audit + Prometheus]
 ```
 
-Agent 主链路：`intent -> context -> retrieval -> planner -> guardrail -> HITL/executor -> response -> memory`。
+Agent 主链路：`context -> retrieval -> llm_router -> guardrail -> HITL/executor -> llm_responder -> memory`。
 
-- 配置 DeepSeek Key 时，Planner 使用 structured tool-calling 输出工具计划。
-- 无 Key 时使用确定性规则作为离线兜底；两种计划都经过相同的 Schema、RBAC、资源和风险校验。
-- 写工具必须关联已批准的审批任务，不能从 FastAPI 或 MCP 通道绕过 HITL。
+架构原则：**认知判断全部交给大模型，安全裁决全部由代码强制。**
+
+- LLM 路由：大模型用 structured tool-calling 自行决定调用哪些只读工具或直接回答；意图分类、指代消解、术语识别都是大模型的语义能力，代码不再写死关键词规则。
+- 结构化校验：回答用 JSON schema 约束，模型自申报其引用的每个资源 ID（举例 vs 状态断言）；代码确定性核对——状态断言必须有本轮工具数据支撑，凭空捏造的资源被拒。
+- 安全护栏（代码写死、大模型无法绕过）：写操作必须经 RBAC + HITL 审批且匹配已批准的工具与参数；单轮工具调用数上限防死循环；按用户/租户限流。写工具不能从 FastAPI 或 MCP 通道绕过 HITL。
+- 本系统的意图理解与回答生成依赖大模型：未配置 `DEEPSEEK_API_KEY` 或无法连接时，系统明确提示需要对接大模型，不提供确定性兜底回答。
 - 对话、审批、审计和限流记录按用户/租户持久化。
+
+当前启动脚本运行单个后端进程；进程内会话锁和聊天限流适用于本机 Demo。生产环境若启用多
+worker 或多实例，应在 API Gateway/Redis/PostgreSQL 层实现共享限流、并发租约和会话锁，
+不能把本 Demo 的进程内保护当作分布式保证。
 
 ## Install
 
@@ -46,17 +53,30 @@ pip install -r requirements-observability.txt
 
 ## Configuration
 
+真实平台统一配置位于 `config/platforms.json`，支持 IP + 账号密码或 IP + Session。详细说明见 `docs/real-platform-config.md`。
+
 复制 `.env.example` 为 `.env` 并按环境填写。
 
 - `DEMO_MODE=true`：开放匿名 readonly 和 demo-token，仅用于本机演示。
 - `DEMO_MODE=false`：禁用匿名访问与 demo-token，且强制要求至少 32 字符的 `DCS_JWT_SECRET`。
 - `DEEPSEEK_API_KEY`：启用 LLM intent、structured planner、摘要和回答生成。
+- `DEEPSEEK_MODEL`：当前端点支持 `deepseek-v4-pro` 和 `deepseek-v4-flash`，默认使用 `deepseek-v4-pro`。
+- `DEEPSEEK_API_URL`：仅接受标准 HTTPS `api.deepseek.com` Chat Completions 地址，避免把凭据发送到错误主机。
 - `DCS_MEMORY_BACKEND=postgres`：Skill 存储切换到 PostgreSQL/pgvector。
 - `DCS_CHECKPOINT_BACKEND=postgres`：LangGraph checkpoint 切换到 PostgresSaver。
 - `DCS_CORS_ORIGINS`：逗号分隔的前端允许来源；生产环境应设置为实际部署域名。
+- `DCS_CHAT_RATE_PER_MINUTE` / `DCS_CHAT_BURST_PER_10S`：单用户聊天速率与突发请求上限。
+- `DCS_CHAT_MAX_CONCURRENT_PER_USER` / `DCS_CHAT_MAX_CONCURRENT_GLOBAL`：单用户与进程级聊天并发上限。
 - `MCP_AUTH_TOKEN`：生产 MCP Server 的调用身份；Demo 可使用 `MCP_CALLER_*` 环境变量。
 
 生产环境应由外部 IdP 签发身份令牌，并将 `DEMO_MODE` 设为 `false`。
+
+Agent 的固定产品身份为“ClawSphere DCS 运维智能体（DCS Copilot）”。聊天响应包含脱敏的
+`response_source`、`llm_status` 和 `context`，前端会明确显示 DeepSeek 正常、降级或未配置状态。
+对话历史使用 3000 token 预算，组合旧对话摘要、相关历史、最近消息和结构化工作状态；所有 LLM
+出站 payload 还会执行敏感字段脱敏和 64 KiB 硬上限。身份与安全规则
+始终位于固定系统提示词中，不参与对话压缩。同一会话存在待审批写操作时，新消息会返回
+HTTP 409，必须先完成审批，以防止历史记录和摘要发生乱序。
 
 ## Run
 

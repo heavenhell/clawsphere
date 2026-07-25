@@ -97,6 +97,8 @@ def retrieve_history(query: str, roles: list[str], top_k: int = 3, tenant_id: st
     return _bm25_search(query, roles, tenant_id, (2,), "alert_case", top_k)
 
 
+
+
 def retrieve_skill_detail(skill_id: str, roles: list[str], tenant_id: str = "global") -> dict[str, Any] | None:
     ensure_knowledge_seeded()
     expected = skill_id.replace(":tier2", ":tier3")

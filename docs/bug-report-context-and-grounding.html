@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>缺陷报告：术语追问答非所问 → LLM-native 架构改造</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1c2430; --muted: #5b6675;
+    --line: #e2e6ec; --accent: #2f6feb; --bad: #c0392b; --good: #1e8e5a;
+    --warn: #b26a00; --code-bg: #f0f2f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12161c; --card:#1a2029; --ink:#e6eaf0; --muted:#9aa6b4;
+      --line:#2a323d; --accent:#5b93ff; --bad:#ff7a6b; --good:#4cc38a;
+      --warn:#e0a24b; --code-bg:#0f141a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font: 15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue","PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 80px; }
+  header.top { border-bottom: 2px solid var(--line); padding-bottom: 20px; margin-bottom: 28px; }
+  h1 { font-size: 26px; margin: 0 0 8px; line-height:1.3; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .sev { display:inline-block; padding:2px 10px; border-radius:20px; font-size:12px;
+    font-weight:600; background:rgba(192,57,43,.12); color:var(--bad); }
+  h2 { font-size:19px; margin: 34px 0 12px; padding-top:6px; }
+  h3 { font-size:15px; margin:20px 0 6px; color:var(--accent); }
+  p { margin: 10px 0; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:16px 18px; margin:14px 0; }
+  .chat { font-size:14px; }
+  .chat .q { color:var(--muted); }
+  .chat .a { border-left:3px solid var(--bad); padding-left:12px; margin:6px 0 14px; }
+  code { background:var(--code-bg); padding:1px 6px; border-radius:5px;
+    font-family: "SF Mono",Menlo,Consolas,monospace; font-size:13px; }
+  pre { background:var(--code-bg); border:1px solid var(--line); border-radius:10px;
+    padding:14px; overflow-x:auto; font-size:13px; line-height:1.55; }
+  ul,ol { padding-left:22px; } li { margin:6px 0; }
+  table { border-collapse: collapse; width:100%; font-size:14px; margin:12px 0; display:block; overflow-x:auto; }
+  th,td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+  th { background:var(--code-bg); font-weight:600; }
+  .ok { color:var(--good); font-weight:600; }
+  .no { color:var(--bad); font-weight:600; }
+  .warnc { color:var(--warn); font-weight:600; }
+  .pill { font-size:12px; padding:1px 8px; border-radius:20px; background:var(--code-bg); color:var(--muted); }
+  .kv { display:grid; grid-template-columns: 130px 1fr; gap:6px 14px; font-size:14px; }
+  .kv dt { color:var(--muted); } .kv dd { margin:0; }
+  blockquote { margin:12px 0; padding:10px 16px; border-left:3px solid var(--accent);
+    background:var(--code-bg); border-radius:0 8px 8px 0; color:var(--ink); }
+  footer { margin-top:40px; padding-top:16px; border-top:1px solid var(--line);
+    color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <span class="sev">缺陷 → 架构改造</span>
+  <h1>术语追问答非所问：从表层缺陷到 LLM-native 架构改造</h1>
+  <div class="meta">项目 ClawSphere DCS Copilot · 报告日期 2026-07-25 · 组件 backend/agent</div>
+</header>
+
+<h2>1. 摘要</h2>
+<p>一次看似简单的对话缺陷——用户问"critical 是什么级别的告警"，助手却索要告警编号；追问"你上面说的时延指什么"，助手答成了上一轮的 CPU Ready——暴露出的并非单点 bug，而是<strong>用确定性关键词规则做语义理解</strong>这一架构选择的系统性局限。经过根因分析与设计讨论，最终决定将<strong>全部认知判断交给大模型，全部安全裁决保留在代码</strong>，完成 LLM-native 改造。</p>
+
+<h2>2. 现象</h2>
+<div class="card chat">
+  <p class="q">对话一</p>
+  <p><strong>Q：</strong>critical 是什么级别的告警？</p>
+  <p class="a"><strong>A：</strong>请告诉我要解释的告警编号，例如 alarm-9001；也可以先问"现在有哪些告警"。</p>
+  <p class="q">对话二（承接上一轮 CPU Ready）</p>
+  <p><strong>Q：</strong>你上面说的时延指什么？</p>
+  <p class="a"><strong>A：</strong>CPU Ready 表示虚拟机的 vCPU 已经准备运行，但仍在等待物理 CPU 调度的时间……（答成了 CPU Ready，而非"时延"）</p>
+</div>
+
+<h2>3. 根因分析（分层）</h2>
+<p>症状离根因很远，且根因不止一处。按定位顺序：</p>
+<table>
+  <tr><th>层</th><th>缺陷</th><th>后果</th></tr>
+  <tr><td>意图分类</td><td>"告警"关键词命中 <code>alert_explain</code> 的判断排在术语识别之前；句式正则只认"什么是 X"不认"X 是什么"</td><td>术语定义问题被误判为"解释某条具体告警"，向用户索要实例 ID</td></tr>
+  <tr><td>指代消解</td><td>回退逻辑无脑抓"历史里最近的任意术语"，无视用户当前指向的"时延"</td><td>任何词典外术语追问都被上一轮术语劫持</td></tr>
+  <tr><td>确定性词典</td><td>硬编码 4 词条，缺"告警级别""时延"</td><td>兜底回答覆盖不到常见术语</td></tr>
+  <tr><td><strong>输出护栏</strong></td><td><strong>grounding 白名单错配</strong>：用"资源 ID 必须出现在本轮工具结果里"约束了不调工具的术语问答</td><td>大模型的正确回答（引用历史对象举例）被判为幻觉、打回确定性模板</td></tr>
+</table>
+
+<h3>真正的病根</h3>
+<p>实测确认：术语解释<em>本就走大模型</em>，大模型也答对了，但 <code>_response_facts_are_grounded</code> 因为"回答提到的 host-005 不在本轮工具结果里"（术语解释不调工具，结果为空）把正确回答判为未接地、回退到只认词典的关键词模板——缺词典就答非所问。</p>
+<blockquote>问题不是"缺什么补什么"，而是<strong>输出护栏把该信任大模型的场景当成了要防幻觉的场景</strong>。防幻觉的白名单对"调工具的资源查询"是对的、必须保留；对"不调工具的知识问答"是错配，纯属误杀。</blockquote>
+
+<h2>4. 解决方案：认知交给大模型，安全留在代码</h2>
+<p>与其继续给每个新术语打补丁，决定从架构上分层：</p>
+<div class="card">
+  <div class="kv">
+    <dt class="ok">交给大模型</dt><dd>意图分类、工具选择、指代消解、术语理解——用 tool-calling 让模型自己决定调工具或直接回答。删除全部关键词规则与确定性响应。</dd>
+    <dt class="ok">保留在代码</dt><dd>RBAC、HITL 审批、写操作裁决、限流、防死循环——确定性、大模型无法绕过、且在模型输出<em>之后</em>独立复检。</dd>
+    <dt class="warnc">校验层</dt><dd>回答用 JSON schema 自申报每个资源引用（举例 vs 状态断言）；代码确定性核对：状态断言必须有本轮工具数据支撑，凭空捏造被拒。举例引用历史对象放行。</dd>
+    <dt class="warnc">离线</dt><dd>不再提供确定性兜底；未配置大模型时明确提示需要对接。</dd>
+  </div>
+</div>
+
+<h3>关键设计取舍</h3>
+<ul>
+  <li><strong>安全裁决绝不交给大模型</strong>："要不要执行 restart_vm"基于工具注册表的静态 risk 属性、代码强制，prompt injection 无法说服。已有回归测试守此线（LLM 提议写操作 → 仍被 RBAC 拦截）。</li>
+  <li><strong>grounding 从"ID 白名单"升级为"数据支撑 + 自申报"</strong>：answer 中每个资源 ID 必须出现在本轮工具结果、或被显式申报为举例，否则拒绝。既允许模型引用真实数据与历史举例，又拦截捏造。</li>
+  <li><strong>防死循环</strong>：单轮工具调用数上限（<code>MAX_TOOL_CALLS_PER_TURN</code>），大模型提议超限即截断。</li>
+</ul>
+
+<h2>5. 改动范围</h2>
+<table>
+  <tr><th>文件</th><th>变更</th></tr>
+  <tr><td><code>backend/agent/copilot.py</code></td><td>认知层重写：<code>llm_router</code> + <code>llm_responder</code> 取代意图关键词链、planner、全部确定性响应；<code>verify_resource_claims</code> 结构化 grounding；step budget。安全节点（guardrail/hitl/tool_executor）原样保留。</td></tr>
+  <tr><td><code>backend/agent/llm.py</code></td><td>新增 <code>call_deepseek_agent_plan</code>（LLM 路由）、<code>call_deepseek_json</code>（结构化输出）。</td></tr>
+  <tr><td><code>backend/memory/context_manager.py</code>、<code>retriever.py</code></td><td>移除 focus_term / glossary 等启发式。</td></tr>
+  <tr><td><code>backend/skills/glossary.py</code></td><td>删除（硬编码术语词典退休）。</td></tr>
+  <tr><td><code>eval/semantic.py</code>、<code>evaluator.py</code>、<code>test_cases.py</code></td><td>质量评估改为语义相似度（可插拔嵌入，带离线降级）；安全评估保持确定性。</td></tr>
+  <tr><td><code>tests/*</code></td><td>安全测试改用 mock LLM 注入提议以确定性驱动护栏；删除确定性路由测试；新增 step-budget、grounding、语义打分测试。</td></tr>
+</table>
+
+<h2>6. 验证</h2>
+<table>
+  <tr><th>项</th><th>结果</th></tr>
+  <tr><td>单元 + 集成测试</td><td class="ok">77 passed</td></tr>
+  <tr><td>安全回归（RBAC / HITL / 审批 / 租户隔离 / prompt injection / step budget / 审计身份）</td><td class="ok">全绿（mock LLM 确定性驱动）</td></tr>
+  <tr><td>LLM 路由实测（术语直答 / 资源查询 / 容量预测 / VM 诊断）</td><td class="ok">5/5 由大模型作答</td></tr>
+  <tr><td>grounding：捏造资源状态</td><td class="ok">确定性拒绝</td></tr>
+  <tr><td>eval 安全率</td><td class="ok">1.0（写操作、注入均被拦截）</td></tr>
+  <tr><td>原始缺陷：术语追问</td><td class="ok">大模型自然消解，不再答非所问</td></tr>
+</table>
+
+<h2>7. 已知限制与后续（诚实记录）</h2>
+<ul>
+  <li><span class="warnc">单轮（single-pass）而非完整 agentic loop</span>：当大模型提议的工具参数偏离严格 schema 时，护栏会硬拦并直接反馈给用户，而不是把工具错误回喂给模型重试。<strong>工具错误 / grounding 拒绝的反馈重试循环是下一步</strong>——它才能让 happy-path 真正稳健。当前所有失败都<em>失败关闭</em>（提示或拦截，绝不臆造）。</li>
+  <li><span class="warnc">嵌入模型未安装</span>：本环境无 <code>sentence-transformers</code>，质量评估退化为字符 n-gram 余弦（偏弱）。因此质量门禁仅在装有真实嵌入模型时启用；当前<strong>安全门禁强制、质量门禁 report-only</strong>。安装后即可启用语义质量门禁。</li>
+  <li>行为测试依赖 mock LLM（确定性、可复现）；线上回答质量交给 eval 抽检。</li>
+  <li>路由偶有次优（如 VM 诊断时未必首选 <code>get_vm_metrics</code>）——属提示词调优范畴，非正确性/安全问题。</li>
+</ul>
+
+<footer>
+  ClawSphere DCS Copilot — 内部工程报告。全部改动位于工作区，尚未提交。安全护栏为不可让渡边界：认知可交给模型，写操作 / 循环 / 频率的裁决永远由代码强制。
+</footer>
+
+</div>
+</body>
+</html>

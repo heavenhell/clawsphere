@@ -1,4 +1,6 @@
-from backend.memory.context_manager import estimate_tokens, manage_context_window
+from inspect import signature
+
+from backend.memory.context_manager import TOKEN_THRESHOLD, estimate_tokens, manage_context_window
 from backend.memory.database import MemoryDatabase
 from backend.memory.retriever import retrieve, retrieve_history
 from backend.skills.loader import load_all_skills, startup_skill_summaries
@@ -67,21 +69,6 @@ def test_agent_returns_rolling_summary_after_six_turns():
     assert len(result["summary"]) <= 1200
 
 
-def test_each_turn_resets_transient_graph_state():
-    conversation_id = "transient-state-test"
-    resources = run_copilot("我现在有哪些资源？", conversation_id=conversation_id)
-    alarms = run_copilot("我现在有哪些严重告警？", conversation_id=conversation_id)
-    capacity = run_copilot("cluster-002 还能撑多久？", conversation_id=conversation_id)
-
-    assert resources["intent"] == "resource_query"
-    assert "资源盘点" in resources["answer"]
-    assert alarms["intent"] == "alert_explain"
-    assert "活动告警" in alarms["answer"]
-    assert capacity["intent"] == "capacity_forecast"
-    assert "9 天" in capacity["answer"]
-    assert len({resources["answer"], alarms["answer"], capacity["answer"]}) == 3
-
-
 def test_chinese_token_estimate_and_summary_boundary():
     messages = [{"role": "user", "content": "这是十个中文字符测试文本"}]
     assert estimate_tokens(messages) >= 10
@@ -94,3 +81,117 @@ def test_chinese_token_estimate_and_summary_boundary():
     context = manage_context_window(long_history)
     assert len(context["conversation_summary"]) <= 1200
     assert not context["conversation_summary"].endswith("第")
+
+
+def test_long_ascii_identifier_token_estimate_scales_with_length():
+    message = [{"role": "user", "content": "dcs-" + "x" * 100}]
+    assert estimate_tokens(message) >= 25
+
+
+def test_context_budget_compresses_fewer_than_six_very_large_turns():
+    history = [
+        {
+            "role": "user" if index % 2 == 0 else "assistant",
+            "content": f"第{index}条：" + "容量告警诊断证据。" * 180,
+        }
+        for index in range(8)
+    ]
+
+    context = manage_context_window(history)
+
+    assert context["older_message_count"] > 0
+    assert context["estimated_tokens"] <= TOKEN_THRESHOLD
+
+
+def test_context_api_accepts_current_message_for_relevance():
+    assert "current_message" in signature(manage_context_window).parameters
+
+
+def test_context_preserves_relevant_older_evidence_and_structured_working_state():
+    history = [
+        {"role": "user", "content": "检查 cluster-001 的容量风险"},
+        {"role": "assistant", "content": "cluster-001 当前需要持续观察。"},
+    ]
+    for index in range(7):
+        history.extend([
+            {"role": "user", "content": f"第 {index} 轮查询普通资源"},
+            {"role": "assistant", "content": f"第 {index} 轮普通资源结果"},
+        ])
+
+    context = manage_context_window(
+        history,
+        current_message="继续分析 cluster-001 的容量趋势",
+    )
+
+    assert any(
+        "cluster-001" in item["content"]
+        for item in context["relevant_messages"]
+    )
+    assert context["working_context"]["active_resource_ids"] == ["cluster-001"]
+    assert context["working_context"]["latest_user_request"] == "继续分析 cluster-001 的容量趋势"
+    assert context["working_context"]["history_message_count"] == len(history)
+    assert context["estimated_tokens"] <= TOKEN_THRESHOLD
+
+
+def test_relevant_history_matches_chinese_topic_without_resource_id():
+    history = [
+        {"role": "user", "content": "之前讨论过集群容量风险和扩容窗口"},
+        {"role": "assistant", "content": "建议持续观察剩余容量。"},
+    ]
+    for index in range(7):
+        history.extend([
+            {"role": "user", "content": f"普通资源查询 {index}"},
+            {"role": "assistant", "content": f"普通资源结果 {index}"},
+        ])
+
+    context = manage_context_window(
+        history,
+        current_message="继续分析容量趋势",
+    )
+
+    assert any(
+        "容量风险" in item["content"]
+        for item in context["relevant_messages"]
+    )
+
+
+def test_relevant_history_keeps_user_and_assistant_turn_together():
+    history = [
+        {"role": "user", "content": "检查 cluster-001 的 CPU Ready"},
+        {"role": "assistant", "content": "峰值为 26%，建议检查宿主机争抢。"},
+    ]
+    for index in range(7):
+        history.extend([
+            {"role": "user", "content": f"普通资源查询 {index}"},
+            {"role": "assistant", "content": f"普通资源结果 {index}"},
+        ])
+
+    context = manage_context_window(
+        history,
+        current_message="继续分析 cluster-001",
+    )
+
+    assert context["relevant_messages"][:2] == history[:2]
+
+
+def test_all_context_sections_share_one_hard_token_budget():
+    history = []
+    for index in range(30):
+        resource_id = f"dcs-{'x' * 50}-{index}"
+        history.extend([
+            {
+                "role": "user",
+                "content": f"{resource_id} 容量告警：" + "容量趋势证据。" * 120,
+            },
+            {
+                "role": "assistant",
+                "content": f"{resource_id} 诊断结论：" + "建议继续观察。" * 120,
+            },
+        ])
+
+    context = manage_context_window(
+        history,
+        current_message="继续分析这些资源的容量趋势：" + "下一步计划。" * 80,
+    )
+
+    assert context["estimated_tokens"] <= TOKEN_THRESHOLD

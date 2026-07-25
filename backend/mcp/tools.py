@@ -32,7 +32,7 @@ from backend.mcp.schemas import (
     VmListParams,
     VmMetricsParams,
 )
-from backend.mock.repository import repo
+from backend.providers import repo
 from backend.memory.database import memory_db
 from backend.observability import TOOL_CALLS, TOOL_LATENCY
 

@@ -263,6 +263,41 @@ p {
   white-space: nowrap;
 }
 
+.runtimeBadges {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.llmBadge {
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid #cdd8e2;
+  color: #41566b;
+  background: #f2f5f8;
+}
+
+.llmBadge.healthy {
+  color: #1f6d46;
+  background: #eaf7ef;
+  border-color: #b9dec7;
+}
+
+.llmBadge.degraded {
+  color: #9a4e1c;
+  background: #fff3e8;
+  border-color: #efc49d;
+}
+
+.llmBadge.not_configured {
+  color: #7b4754;
+  background: #f9edf0;
+  border-color: #e3bcc6;
+}
+
 .exampleBar {
   display: flex;
   gap: 8px;
@@ -374,6 +409,27 @@ p {
 
 .tracePanel {
   margin-top: 0;
+}
+
+.runtimeTrace {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  padding: 10px;
+  margin-bottom: 10px;
+  border: 1px solid #dce5eb;
+  border-radius: 8px;
+  background: #f7f9fb;
+  font-size: 12px;
+}
+
+.runtimeTrace strong {
+  color: #24536b;
+}
+
+.runtimeTrace small {
+  grid-column: 1 / -1;
+  color: #647487;
 }
 
 .traceItem,

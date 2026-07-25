@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import threading
 from typing import Any, Literal, TypedDict
 from uuid import uuid4
@@ -9,19 +8,37 @@ from uuid import uuid4
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command, interrupt
 
-from backend.agent.llm import call_deepseek, call_deepseek_tool_plan, classify_intent_with_llm, summarize_messages
+from backend.agent.llm import (
+    DEEPSEEK_MODEL,
+    call_deepseek_agent_plan,
+    call_deepseek_json,
+    get_llm_status,
+    get_public_llm_status,
+    reset_llm_request_status,
+    summarize_messages,
+)
 from backend.agent.checkpoint import close_checkpointer, get_checkpointer
+from backend.agent.identity import build_system_prompt
 from backend.guardrails.approvals import approval_store
-from backend.guardrails.policy import detect_write_intent, risk_for_tool, validate_tool_calls
+from backend.guardrails.policy import risk_for_tool, validate_tool_calls
 from backend.mcp.schemas import ToolRequest
 from backend.mcp.tools import TOOL_REGISTRY, call_tool
-from backend.memory.context_manager import deterministic_summary, manage_context_window
+from backend.memory.context_manager import (
+    RESOURCE_ID_PATTERN,
+    deterministic_summary,
+    manage_context_window,
+)
 from backend.memory.database import memory_db
-from backend.memory.retriever import retrieve, retrieve_history, retrieve_skill_detail
+from backend.memory.retriever import retrieve, retrieve_history
 from backend.memory.store import write_conversation_summary
-from backend.mock.repository import repo
 from backend.skills.loader import startup_skill_summaries
 from backend.observability import observe_agent
+
+
+# --- Configuration -----------------------------------------------------------
+# Death-loop / runaway guardrail: a single turn may execute at most this many
+# tool calls, no matter what the model proposes.
+MAX_TOOL_CALLS_PER_TURN = 8
 
 
 class CopilotState(TypedDict, total=False):
@@ -35,6 +52,9 @@ class CopilotState(TypedDict, total=False):
     tenant_id: str
     conversation_summary: str
     recent_messages: list[dict[str, str]]
+    relevant_messages: list[dict[str, str]]
+    working_context: dict[str, Any]
+    context_metrics: dict[str, Any]
     alert_payload: dict | None
     resource_snapshot: dict | None
     retrieved_docs: list[dict]
@@ -47,169 +67,84 @@ class CopilotState(TypedDict, total=False):
     hitl_approved: bool | None
     execution_log: list[dict[str, Any]]
     final_response: str
+    resource_claims: list[dict[str, Any]]
+    response_source: str
+    llm_available: bool
+    step_budget_hit: bool
+    llm_status: dict[str, Any]
+    fallback_reason: str | None
     summary: str
     error: str | None
 
 
-SYSTEM_PROMPT = f"""你是 DCS/FusionCompute/eDME 运维 Copilot。
-回答要自然，但在识别到运维意图时必须基于工具结果和检索到的 Skill。
-不要编造工具结果之外的资源状态。写操作、变更、重启、删除、扩容只能进入审批，不能声称已执行。
-输出优先包含：结论、证据、建议动作、风险/下一步。
+SYSTEM_PROMPT = build_system_prompt(DEEPSEEK_MODEL, startup_skill_summaries())
 
-可用 Skill 第一层：
+ROUTER_PROMPT = f"""你是 DCS/FusionCompute/eDME 运维 Copilot 的路由器。
+根据完整对话判断用户意图,自行决定调用哪些只读工具获取真实数据,或不调用工具直接回答概念/寒暄/身份类问题。
+规则:
+- 优先使用最少、最相关的工具。一般的告警/资源/容量/性能问题使用 FusionCompute/Dorado 工具(如 list_alarms、get_resource_overview);只有用户明确提到 eDME、OceanStor 或存储设备纳管时才使用 query_edme_* 工具。
+- 调用工具时严格按参数 schema 传参,不要添加 schema 未定义的字段,不确定的可选参数就不要传。
+- 只有用户明确指向的对象(VM/集群/告警/存储 ID 或名称)才调用相关工具;缺少标识时不要猜测资源,也不要调用工具。
+- 术语解释、概念说明、寒暄、自我介绍等不需要实时数据的问题,不要调用工具。
+- 写操作(重启/扩容/迁移/修改/删除)只提出对应工具调用,是否执行由护栏和审批独立裁决,你无法绕过。
+- 追问("它呢""第二条""上面说的X")请结合历史自行消解指代。
+
+可用 Skill 第一层:
 {startup_skill_summaries()}"""
 
+RESPONDER_PROMPT = """你是 DCS/FusionCompute/eDME 运维 Copilot,负责生成最终回答。
+必须严格输出 JSON,字段:
+- "answer": 给用户的自然语言回答。结论优先,附证据、建议动作、风险/下一步。
+- "resource_claims": 数组。回答里出现的每一个资源 ID(如 vm-1001、host-005、alarm-9001、edme-storage-002)都必须在此申报一条:
+    - {"id": "<资源ID>", "kind": "example"}  用于举例说明或引用历史上下文,不断言其当前状态。
+    - {"id": "<资源ID>", "kind": "state_assertion", "from_tool": "<工具名>"}  断言该资源的当前状态/数值,必须来自本轮某个工具结果。
 
-def _contains(message: str, words: list[str]) -> bool:
-    return any(word in message for word in words)
+硬性要求:
+- 只能基于 tool_results 里的真实数据断言资源状态;严禁编造 tool_results 之外的资源、数值或状态。
+- 解释术语/概念时只讲原理,可引用历史对象举例(kind=example),但不要声称它们的当前状态。
+- 写操作在审批前一律说明"已进入审批,未执行",不得声称已完成。
+- answer 中提到的每个资源 ID 都必须在 resource_claims 里出现,不得遗漏。"""
 
-
-def classify_intent(message: str) -> str:
-    stripped = message.strip()
-    if stripped.lower() in {"hi", "hello"} or stripped in {"你好", "您好", "嗨", "在吗", "谢谢", "感谢", "辛苦了"}:
-        return "smalltalk"
-    if detect_write_intent(message):
-        return "change_execute"
-    if "edme" in stripped.lower():
-        return "edme_operations"
-    if _contains(message, ["第一条", "第二条", "第三条", "上一条", "下一条", "这条", "那条", "它呢"]):
-        return "alert_explain"
-    if _contains(message, ["告警", "报警", "alarm"]):
-        return "alert_explain"
-    if _contains(message, ["容量", "撑多久", "预测", "剩余", "扩容"]):
-        return "capacity_forecast"
-    if _contains(message, ["变慢", "性能", "卡", "CPU", "cpu", "内存", "延迟", "dcs-app"]):
-        return "vm_diagnosis"
-    if _contains(message, ["虚拟机", "云服务器", "VM", "vm", "主机", "集群", "数据存储", "存储", "资源", "资产", "环境", "概览", "总览", "平台情况", "有哪些", "有多少", "列表"]):
-        return "resource_query"
-    return "general"
+LLM_UNAVAILABLE_MESSAGE = (
+    "当前未配置或无法连接大模型(DeepSeek)。本系统的意图理解与回答生成依赖大模型,"
+    "请在 .env 中配置 DEEPSEEK_API_KEY 或恢复网络后重试。"
+)
 
 
-def extract_cluster_id(message: str) -> str | None:
-    match = re.search(r"cluster-\d+", message, re.I)
-    return match.group(0).lower() if match else None
+def _rbac_tool_catalog(roles: list[str]) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": spec.name,
+                "description": spec.description,
+                "parameters": spec.input_model.model_json_schema(),
+            },
+        }
+        for spec in TOOL_REGISTRY.values()
+        if any(role in spec.auth_roles for role in roles)
+    ]
 
 
-def extract_vm_id(message: str) -> str | None:
-    match = re.search(r"(vm-\d+|dcs-[a-z0-9-]+)", message, re.I)
-    return match.group(0) if match else None
+def _llm_history(state: CopilotState) -> list[dict[str, str]]:
+    """Compose the chat history handed to the LLM: rolling summary + relevant +
+    recent turns + the current user message."""
+    history: list[dict[str, str]] = []
+    summary = state.get("conversation_summary", "").strip()
+    if summary:
+        history.append({"role": "system", "content": f"对话摘要:\n{summary}"})
+    seen: set[tuple[str, str]] = set()
+    for item in [*state.get("relevant_messages", []), *state.get("recent_messages", [])]:
+        key = (item.get("role", ""), item.get("content", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        history.append({"role": item.get("role", "user"), "content": item.get("content", "")})
+    history.append({"role": "user", "content": state["message"]})
+    return history
 
 
-def extract_alarm_id(message: str, history: list[dict[str, str]] | None = None) -> str | None:
-    explicit = re.search(r"alarm-\d+", message, re.I)
-    if explicit:
-        return explicit.group(0).lower()
-    ordinal_map = {"第一条": 0, "第1条": 0, "第二条": 1, "第2条": 1, "第三条": 2, "第3条": 2}
-    for keyword, index in ordinal_map.items():
-        if keyword in message:
-            alarms = [alarm for alarm in repo.alarms() if alarm.get("status") == "active"]
-            if index < len(alarms):
-                return alarms[index]["id"]
-    if _contains(message, ["它呢", "这条", "那条", "这个", "那个"]):
-        for item in reversed(history or []):
-            matches = re.findall(r"alarm-\d+", item.get("content", ""), re.I)
-            if matches:
-                return matches[-1].lower()
-    return None
-
-
-def make_plan(intent: str, message: str) -> list[str]:
-    plans = {
-        "alert_explain": ["查询告警列表", "必要时查询告警详情", "结合 Skill 给出处置建议"],
-        "capacity_forecast": ["查询集群容量", "运行容量预测", "输出风险等级和建议"],
-        "vm_diagnosis": ["查询 VM 详情", "查询 VM 性能指标", "关联告警并给出诊断"],
-        "resource_query": ["查询资源总览", "按用户问题筛选资源类型", "输出数量或列表"],
-        "edme_operations": ["识别 eDME 运维对象", "查询 eDME 资源、告警或性能数据", "基于结果给出结论"],
-        "change_execute": ["识别高风险变更", "进入护栏和审批流程", "不直接执行"],
-        "smalltalk": ["自然回应"],
-    }
-    return plans.get(intent, ["自然回应或引导用户说明运维目标"])
-
-
-def plan_tools(intent: str, message: str, history: list[dict[str, str]]) -> list[dict[str, Any]]:
-    if intent == "edme_operations":
-        if _contains(message, ["告警", "报警", "alarm"]):
-            return [{"tool_name": "query_edme_current_alarms", "params": {}}]
-        if _contains(message, ["性能", "指标", "延迟", "IOPS", "iops"]):
-            return [
-                {"tool_name": "query_edme_resources", "params": {"class_name": "SYS_StorageDevice"}},
-                {"tool_name": "get_edme_metric_catalog", "params": {}},
-                {"tool_name": "query_edme_performance_history", "params": {"time_range": "LAST_1_HOUR"}},
-            ]
-        return [
-            {"tool_name": "query_edme_resources", "params": {"class_name": "SYS_StorageDevice"}},
-            {"tool_name": "query_edme_current_alarms", "params": {}},
-        ]
-    if intent == "alert_explain":
-        calls = [{"tool_name": "list_alarms", "params": {}}]
-        alarm_id = extract_alarm_id(message, history)
-        asks_list = _contains(message, ["哪些", "列表", "多少", "当前", "现在", "所有"])
-        if alarm_id:
-            calls.append({"tool_name": "get_alarm_detail", "params": {"alarm_id": alarm_id}})
-        elif not asks_list:
-            return []
-        return calls
-    if intent == "capacity_forecast":
-        cluster_id = extract_cluster_id(message)
-        if not cluster_id:
-            return []
-        return [
-            {"tool_name": "get_cluster_capacity", "params": {"cluster_id": cluster_id}},
-            {"tool_name": "run_capacity_forecast", "params": {"cluster_id": cluster_id, "forecast_days": 30}},
-        ]
-    if intent == "vm_diagnosis":
-        vm_id = extract_vm_id(message)
-        if not vm_id:
-            return []
-        return [
-            {"tool_name": "get_vm_detail", "params": {"vm_id": vm_id}},
-            {"tool_name": "get_vm_metrics", "params": {"vm_id": vm_id, "time_range": "1h"}},
-            {"tool_name": "list_alarms", "params": {}},
-        ]
-    if intent == "resource_query":
-        return [
-            {"tool_name": "get_resource_overview", "params": {}},
-            {"tool_name": "list_clusters", "params": {}},
-            {"tool_name": "list_vms", "params": {}},
-        ]
-    if intent == "change_execute":
-        if "重启" in message:
-            vm_id = extract_vm_id(message)
-            if not vm_id:
-                return []
-            return [{
-                "tool_name": "restart_vm",
-                "params": {"vm_id": vm_id, "reason": message, "change_ticket_id": "DEMO-AUTO"},
-            }]
-        if "扩容" in message or "扩缩容" in message:
-            cluster_id = extract_cluster_id(message)
-            if not cluster_id:
-                return []
-            count = re.search(r"(?:到|至|为)\s*(\d+)\s*台", message)
-            current = next((cluster["host_count"] for cluster in repo.clusters() if cluster["id"] == cluster_id), 1)
-            target_hosts = int(count.group(1)) if count else current + 1
-            return [{"tool_name": "scale_cluster", "params": {"cluster_id": cluster_id, "target_hosts": target_hosts, "reason": message}}]
-        if "HA" in message.upper() or "策略" in message:
-            cluster_id = extract_cluster_id(message)
-            if not cluster_id:
-                return []
-            return [{
-                "tool_name": "modify_ha_policy",
-                "params": {"cluster_id": cluster_id, "policy": {"enabled": True}, "reason": message},
-            }]
-        return []
-    return []
-
-
-def intent_classifier(state: CopilotState) -> CopilotState:
-    intent = classify_intent(state["message"])
-    if intent == "general":
-        try:
-            intent = classify_intent_with_llm(state["message"], state.get("messages", [])) or intent
-        except Exception:
-            pass
-    return {"intent": intent}
-
+# --- Context / retrieval (feed the model) ------------------------------------
 
 def context_loader(state: CopilotState) -> CopilotState:
     def summarizer(messages: list[dict[str, str]]) -> str:
@@ -222,9 +157,18 @@ def context_loader(state: CopilotState) -> CopilotState:
         state.get("messages", []),
         state.get("conversation_summary", ""),
         summarizer,
+        current_message=state["message"],
     )
     return {
         "recent_messages": context["recent_messages"],
+        "relevant_messages": context["relevant_messages"],
+        "working_context": context["working_context"],
+        "context_metrics": {
+            "schema_version": context["schema_version"],
+            "older_message_count": context["older_message_count"],
+            "relevant_message_count": len(context["relevant_messages"]),
+            "estimated_tokens": context["estimated_tokens"],
+        },
         "conversation_summary": context["conversation_summary"],
         "resource_snapshot": None,
         "alert_payload": None,
@@ -237,60 +181,38 @@ def memory_retriever(state: CopilotState) -> CopilotState:
     return {"retrieved_docs": docs, "retrieved_history": history}
 
 
-def planner(state: CopilotState) -> CopilotState:
-    docs = list(state.get("retrieved_docs", []))
-    if docs:
-        detail = retrieve_skill_detail(docs[0]["id"], state["user_roles"], state["tenant_id"])
-        if detail:
-            docs.append(detail)
-    llm_plan = None
-    if state["intent"] not in {"smalltalk", "general", "change_execute"}:
-        intent_tools = {
-            "edme_operations": {
-                "query_edme_current_alarms",
-                "query_edme_resources",
-                "get_edme_metric_catalog",
-                "query_edme_performance_history",
-            },
-        }.get(state["intent"])
-        tool_catalog = [
-            {
-                "type": "function",
-                "function": {
-                    "name": spec.name,
-                    "description": spec.description,
-                    "parameters": spec.input_model.model_json_schema(),
-                },
-            }
-            for spec in TOOL_REGISTRY.values()
-            if any(role in spec.auth_roles for role in state["user_roles"])
-            and (intent_tools is None or spec.name in intent_tools)
-        ]
-        try:
-            llm_plan = call_deepseek_tool_plan(
-                state["message"],
-                state["intent"],
-                state.get("recent_messages", []),
-                docs,
-                tool_catalog,
-            )
-        except Exception:
-            llm_plan = None
-    calls = (
-        llm_plan["tool_calls"]
-        if llm_plan is not None
-        else plan_tools(state["intent"], state["message"], state.get("recent_messages", []))
-    )
-    plan = make_plan(state["intent"], state["message"])
-    if llm_plan and llm_plan.get("reason"):
-        plan = [llm_plan["reason"], *plan]
+# --- Cognitive layer: routing is the model's job -----------------------------
+
+def llm_router(state: CopilotState) -> CopilotState:
+    tools = _rbac_tool_catalog(state["user_roles"])
+    try:
+        plan = call_deepseek_agent_plan(ROUTER_PROMPT, _llm_history(state), tools)
+    except Exception:
+        plan = None
+    if plan is None:
+        return {
+            "tool_calls_proposed": [],
+            "plan": [],
+            "plan_source": "llm_unavailable",
+            "llm_available": False,
+            "step_budget_hit": False,
+            "intent": "unavailable",
+        }
+    calls = plan.get("tool_calls", []) or []
+    step_budget_hit = len(calls) > MAX_TOOL_CALLS_PER_TURN
+    calls = calls[:MAX_TOOL_CALLS_PER_TURN]
+    reason = plan.get("reason") or ""
     return {
-        "plan": plan,
-        "plan_source": "deepseek_tool_calling" if llm_plan is not None else "deterministic_fallback",
         "tool_calls_proposed": calls,
-        "retrieved_docs": docs,
+        "plan": [reason] if reason else [],
+        "plan_source": "deepseek_agent",
+        "llm_available": True,
+        "step_budget_hit": step_budget_hit,
+        "intent": "tool_execution" if calls else "direct_answer",
     }
 
+
+# --- Safety spine (unchanged): RBAC / risk / rate limit / HITL / execute -----
 
 def guardrail(state: CopilotState) -> CopilotState:
     result = validate_tool_calls(
@@ -333,6 +255,7 @@ def hitl_interrupt(state: CopilotState) -> CopilotState:
     )
     decision = interrupt({
         "approval_id": item["id"],
+        "task_id": item["task_id"],
         "description": item["description"],
         "tool_calls": item["tool_calls"],
         "risk": item["risk"],
@@ -378,179 +301,167 @@ def tool_executor(state: CopilotState) -> CopilotState:
     return {"tool_results": results, "execution_log": execution_log}
 
 
-def _tool_data(state: CopilotState) -> dict[str, Any]:
-    return {item["tool_name"]: item.get("data") for item in state.get("tool_results", []) if item.get("success")}
+# --- Response + verification: structured output, code-side grounding ---------
+
+def _collect_ids(text: str) -> set[str]:
+    return {item.lower() for item in RESOURCE_ID_PATTERN.findall(text)}
 
 
-def _respond_alert(state: CopilotState, data: dict[str, Any]) -> str:
-    message = state["message"]
-    asks_list = _contains(message, ["哪些", "列表", "多少", "当前", "现在", "所有"])
-    alarm_id = extract_alarm_id(message, state.get("recent_messages", []))
-    if not asks_list and not alarm_id:
-        return "请告诉我要解释的告警编号，例如 alarm-9001；也可以先问“现在有哪些告警”。"
-    alarms = data.get("list_alarms") or []
-    if asks_list and not alarm_id:
-        alarm_lines = "\n".join(f"- {a['id']}：{a['name']}，级别 {a['severity']}，对象 {a['object_type']} / {a['object_id']}，状态 {a['status']}" for a in alarms)
-        return f"当前共有 {len(alarms)} 条活动告警。\n\n{alarm_lines}\n\n你可以继续问：第一条告警的原因？第二条呢？"
-    detail = data.get("get_alarm_detail") or {}
-    alarm = detail.get("alarm", {})
-    related = detail.get("related", {})
-    if alarm.get("object_type") == "host":
-        host = related.get("host") or {}
-        return f"结论：{alarm.get('id')} 的主要风险是 {alarm.get('name')}。\n\n证据：关联主机 {host.get('name')} 状态 {host.get('status')}，CPU {int(host.get('cpu_usage', 0) * 100)}%，内存 {int(host.get('memory_usage', 0) * 100)}%。\n\n建议动作：检查同主机 VM 和近期任务峰值，必要时迁移部分 VM 或规划扩容。\n\n风险提示：不要直接重启主机，先确认业务窗口和 HA 策略。"
-    ds = related.get("datastore") or {}
-    return f"结论：{alarm.get('id')} 的主要风险是 {alarm.get('name')}。\n\n证据：关联数据存储 {ds.get('name')} 剩余 {ds.get('free_gb')}GB / 总量 {ds.get('capacity_gb')}GB。\n\n建议动作：先清理过期快照和低价值镜像，确认增长最快的 VM；如无法释放空间，准备扩容或迁移计划。\n\n风险提示：不要直接删除未知磁盘或快照，先确认业务归属和备份状态。"
+def verify_resource_claims(
+    answer: str,
+    claims: list[dict[str, Any]],
+    tool_results: list[dict[str, Any]],
+) -> tuple[bool, str]:
+    """Deterministic grounding check over the model's self-declared claims.
 
-
-def _respond_capacity(state: CopilotState, data: dict[str, Any]) -> str:
-    if not extract_cluster_id(state["message"]):
-        return "请指定要预测的集群，例如 cluster-001 或 cluster-002。"
-    forecast = data.get("run_capacity_forecast") or {}
-    return f"结论：{forecast.get('cluster_id')} 容量风险为 {forecast.get('risk_level')}。\n\n证据：日增长约 {forecast.get('daily_growth_gb')}GB，预计 {forecast.get('days_to_exhaustion')} 天后耗尽。\n\n建议动作：{forecast.get('recommendation')}"
-
-
-def _respond_vm(state: CopilotState, data: dict[str, Any]) -> str:
-    vm_id = extract_vm_id(state["message"])
-    if not vm_id:
-        return "请指定要诊断的虚拟机 ID 或名称，例如 vm-1001 或 dcs-app-01。"
-    failed = [item for item in state.get("tool_results", []) if not item.get("success")]
-    if failed or not data.get("get_vm_detail"):
-        return f"未找到虚拟机 {vm_id}，因此没有生成性能结论。请确认 VM ID 或名称后重试。"
-    metrics = (data.get("get_vm_metrics") or {}).get("series", [])
-    warnings = [metric for metric in metrics if metric.get("status") == "warning"]
-    warning_text = "；".join(f"{metric['metric']}={metric['value']}{metric['unit']}" for metric in warnings) or "未发现明显异常"
-    return f"结论：该 VM 的性能问题优先排查 CPU ready、CPU usage 和存储延迟。\n\n证据：{warning_text}。\n\n建议动作：先确认所在主机是否过载，再检查同主机 VM 的 CPU 争用；若磁盘延迟持续高于 20ms，继续排查数据存储。"
-
-
-def _respond_resource(state: CopilotState, data: dict[str, Any]) -> str:
-    message = state["message"]
-    resource = data.get("get_resource_overview") or {}
-    overview = resource.get("overview", {})
-    if _contains(message, ["虚拟机", "云服务器", "VM", "vm"]):
-        vms = resource.get("vms", [])
-        lines = "\n".join(f"- {vm['name']}：{vm['status']}，{vm['cpu']} vCPU，{vm['memory_mb']}MB，IP {vm['ip']}，所在主机 {vm['host_id']}" for vm in vms)
-        return f"当前共有 {len(vms)} 台虚拟机。\n\n{lines}"
-    if "主机" in message:
-        hosts = resource.get("hosts", [])
-        lines = "\n".join(f"- {host['name']}：{host['status']}，管理 IP {host['management_ip']}，CPU {int(host['cpu_usage'] * 100)}%，内存 {int(host['memory_usage'] * 100)}%" for host in hosts)
-        return f"当前共有 {len(hosts)} 台主机。\n\n{lines}"
-    if "集群" in message:
-        clusters = resource.get("clusters", [])
-        lines = "\n".join(f"- {cluster['name']}：{cluster['status']}，主机 {cluster['host_count']} 台，VM {cluster['vm_count']} 台" for cluster in clusters)
-        return f"当前共有 {len(clusters)} 个集群。\n\n{lines}"
-    if _contains(message, ["存储", "数据存储"]):
-        datastores = resource.get("datastores", [])
-        lines = "\n".join(f"- {datastore['name']}：{datastore['status']}，剩余 {datastore['free_gb']}GB / 总量 {datastore['capacity_gb']}GB" for datastore in datastores)
-        return f"当前共有 {len(datastores)} 个数据存储。\n\n{lines}"
-    return f"资源盘点：站点 {len(resource.get('sites', []))} 个，集群 {overview.get('cluster_count')} 个，主机 {overview.get('host_count')} 台，VM {overview.get('vm_count')} 台，数据存储 {overview.get('datastore_count')} 个，活跃告警 {overview.get('active_alarm_count')} 条。"
-
-
-def _respond_change(state: CopilotState, _data: dict[str, Any]) -> str:
-    message = state["message"]
-    if not state.get("tool_calls_proposed"):
-        if "重启" in message:
-            return "请指定要重启的虚拟机 ID 或名称，确认对象后我再生成审批。"
-        if _contains(message, ["扩容", "扩缩容", "HA", "策略"]):
-            return "请指定要变更的集群 ID，例如 cluster-002，确认对象后我再生成审批。"
-        if _contains(message, ["删除", "销毁", "清空"]):
-            return "请求被护栏拦截：当前系统不支持删除或销毁资源。"
-        return "请补充明确的变更对象和动作，我不会猜测资源后发起执行。"
-    completed = [item for item in state.get("tool_results", []) if item.get("success")]
-    if completed:
-        result = completed[-1].get("data") or {}
-        return f"变更已获批准并执行完成。任务 {result.get('task_id')}，动作 {result.get('action')}，对象 {result.get('resource_name') or result.get('resource_id')}，状态 {result.get('status')}。"
-    return "该请求涉及写操作，已按护栏要求进入审批流程，审批前不会执行变更。"
-
-
-def _respond_edme(state: CopilotState, data: dict[str, Any]) -> str:
-    message = state["message"]
-    if _contains(message, ["告警", "报警", "alarm"]):
-        alarms = (data.get("query_edme_current_alarms") or {}).get("hits", [])
-        lines = "\n".join(
-            f"- {item.get('alarmId')}：{item.get('alarmName')}，级别 {item.get('severity')}，"
-            f"对象 {item.get('meName')}，可能原因：{item.get('probableCause')}"
-            for item in alarms
-        )
-        return f"eDME 当前共有 {len(alarms)} 条活动告警。\n\n{lines}"
-    if _contains(message, ["性能", "指标", "延迟", "IOPS", "iops"]):
-        history = data.get("query_edme_performance_history") or {}
-        names = {item["id"]: item for item in history.get("indicators", [])}
-        lines = "\n".join(
-            f"- {point['objectId']}：{names.get(point['indicatorId'], {}).get('name', point['indicatorId'])}="
-            f"{point['value']}{names.get(point['indicatorId'], {}).get('unit', '')}"
-            for point in history.get("series", [])
-        )
-        return f"eDME 最近一小时性能数据如下：\n\n{lines}"
-    resources = (data.get("query_edme_resources") or {}).get("objList", [])
-    alarms = (data.get("query_edme_current_alarms") or {}).get("hits", [])
-    lines = "\n".join(
-        f"- {item['name']}：{item['healthStatus']}，剩余 {item['freeCapacityGB']}GB / 总量 {item['totalCapacityGB']}GB，管理 IP {item['managementIp']}"
-        for item in resources
-    )
-    return f"eDME 当前纳管 {len(resources)} 台存储设备，活动告警 {len(alarms)} 条。\n\n{lines}"
-
-
-def deterministic_response(state: CopilotState) -> str:
-    intent = state["intent"]
-    if state.get("error"):
-        if intent == "vm_diagnosis" and "虚拟机不存在" in state["error"]:
-            vm_id = extract_vm_id(state["message"])
-            return f"未找到虚拟机 {vm_id}，因此没有生成性能结论。请确认 VM ID 或名称后重试。"
-        return f"请求被护栏拦截：{state['error']}"
-    if state.get("final_response"):
-        return state["final_response"]
-    if intent == "smalltalk":
-        return "你好，我在。你可以自然地问我资源、告警、容量、VM 性能，也可以继续追问上一轮结果。"
-    handlers = {
-        "alert_explain": _respond_alert,
-        "capacity_forecast": _respond_capacity,
-        "vm_diagnosis": _respond_vm,
-        "resource_query": _respond_resource,
-        "edme_operations": _respond_edme,
-        "change_execute": _respond_change,
+    Every resource ID mentioned in the answer must be either:
+      - present in this turn's tool results (grounded by real data), or
+      - explicitly declared as an `example` (concept illustration / history).
+    Anything else is a fabrication or an ungrounded history-state claim and is
+    rejected. State-assertion claims must additionally be backed by tool data."""
+    answer_ids = _collect_ids(answer)
+    # Text of this turn's tool results — substring lookup grounds any ID format
+    # the tools actually returned (site-001, pool ids, hex ids), not only those
+    # matched by the resource-ID pattern.
+    tool_text = json.dumps(tool_results, ensure_ascii=False).lower()
+    tool_ids = _collect_ids(json.dumps(tool_results, ensure_ascii=False))
+    example_ids = {
+        str(c.get("id", "")).lower()
+        for c in claims
+        if c.get("kind") == "example" and c.get("id")
     }
-    handler = handlers.get(intent)
-    if handler:
-        return handler(state, _tool_data(state))
-    return "我在。你可以问资源、告警、容量预测、VM 性能诊断，也可以继续追问上一轮结果。"
+    for answer_id in answer_ids:
+        if answer_id in tool_ids or answer_id in example_ids:
+            continue
+        return False, f"回答中出现无数据支撑的资源引用：{answer_id}"
+    for claim in claims:
+        if claim.get("kind") == "state_assertion":
+            claim_id = str(claim.get("id", "")).lower()
+            if claim_id and claim_id not in tool_text:
+                return False, f"状态断言无工具数据支撑：{claim.get('id')}"
+    return True, ""
 
 
-def _response_facts_are_grounded(response: str, state: CopilotState) -> bool:
-    pattern = r"(?:alarm|cluster|vm|ds|host)-\d+|dcs-[a-z0-9-]+|edme-[a-z0-9-]+|\b[a-f0-9]{32}\b"
-    mentioned = {item.lower() for item in re.findall(pattern, response, re.I)}
-    if not mentioned:
-        return True
-    evidence = json.dumps(state.get("tool_results", []), ensure_ascii=False)
-    grounded = {item.lower() for item in re.findall(pattern, evidence, re.I)}
-    return mentioned <= grounded
+RESPONDER_TOOL_DATA_CAP = 8000
+RESPONDER_PAYLOAD_CAP = 48_000
 
 
-def response_generator(state: CopilotState) -> CopilotState:
-    if state.get("error") or state["intent"] in {"change_execute", "config_modify"}:
-        return {"final_response": deterministic_response(state)}
-    prompt = json.dumps({
+def _cap(value: Any, limit: int) -> Any:
+    text = json.dumps(value, ensure_ascii=False)
+    if len(text) <= limit:
+        return value
+    return text[:limit] + "…(截断)"
+
+
+def _responder_payload(state: CopilotState, feedback: str = "") -> str:
+    """Bounded payload for the responder. The full tool_results can exceed the
+    outbound size cap, so each result's data is capped and low-value context is
+    trimmed. Resource IDs are preserved so grounding stays meaningful."""
+    tool_results = [
+        {
+            "tool_name": item.get("tool_name"),
+            "success": item.get("success"),
+            "error_code": item.get("error_code"),
+            "data": _cap(item.get("data"), RESPONDER_TOOL_DATA_CAP),
+        }
+        for item in state.get("tool_results", [])
+    ]
+    payload = {
         "message": state["message"],
-        "intent": state["intent"],
-        "conversation_summary": state.get("conversation_summary", ""),
-        "recent_messages": state.get("recent_messages", []),
-        "retrieved_docs": state.get("retrieved_docs", []),
+        "conversation_summary": state.get("conversation_summary", "")[:1500],
+        "working_context": state.get("working_context", {}),
+        "recent_messages": state.get("recent_messages", [])[-6:],
+        "retrieved_docs": [
+            {"title": doc.get("title"), "content": (doc.get("content") or "")[:500]}
+            for doc in state.get("retrieved_docs", [])[:3]
+        ],
         "plan": state.get("plan", []),
-        "plan_source": state.get("plan_source"),
-        "tool_results": state.get("tool_results", []),
+        "tool_results": tool_results,
         "error": state.get("error"),
-    }, ensure_ascii=False, indent=2)
-    llm_response = None
-    try:
-        llm_response = call_deepseek(SYSTEM_PROMPT, prompt)
-    except Exception as exc:
-        state.setdefault("tool_results", []).append({"tool_name": "deepseek", "success": False, "error_msg": str(exc)})
-    if llm_response and _response_facts_are_grounded(llm_response, state):
-        return {"final_response": llm_response}
-    return {"final_response": deterministic_response(state)}
+    }
+    if feedback:
+        payload["previous_attempt_rejected_because"] = feedback
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2)
+    if len(serialized.encode("utf-8")) > RESPONDER_PAYLOAD_CAP:
+        # Last-resort shrink: drop retrieved docs, then hard-truncate.
+        payload["retrieved_docs"] = []
+        serialized = json.dumps(payload, ensure_ascii=False, indent=2)
+        if len(serialized.encode("utf-8")) > RESPONDER_PAYLOAD_CAP:
+            serialized = serialized[:RESPONDER_PAYLOAD_CAP] + "…(截断)"
+    return serialized
+
+
+def llm_responder(state: CopilotState) -> CopilotState:
+    if state.get("final_response"):
+        # Set upstream (e.g. HITL rejection message).
+        return {"response_source": "policy", "llm_status": get_public_llm_status()}
+    if state.get("llm_available") is False:
+        return {
+            "final_response": LLM_UNAVAILABLE_MESSAGE,
+            "response_source": "unavailable",
+            "llm_status": get_public_llm_status(),
+            "fallback_reason": "llm_not_configured",
+        }
+    if state.get("error"):
+        return {
+            "final_response": f"请求被护栏拦截：{state['error']}",
+            "response_source": "guardrail",
+            "llm_status": get_public_llm_status(),
+            "fallback_reason": "guardrail_block",
+        }
+
+    feedback = ""
+    last_reason = "grounding_rejected"
+    for attempt in range(3):
+        try:
+            # Generous token budget: the model must emit the answer plus a claim
+            # per resource as JSON; too small a cap truncates the JSON (finish
+            # reason "length") and it fails to parse.
+            parsed = call_deepseek_json(RESPONDER_PROMPT, _responder_payload(state, feedback), max_tokens=4096)
+        except Exception as exc:
+            # Transient/endpoint error: retry within budget before degrading.
+            last_reason = f"llm_error:{type(exc).__name__}"
+            if attempt < 2:
+                continue
+            return {
+                "final_response": LLM_UNAVAILABLE_MESSAGE,
+                "response_source": "unavailable",
+                "llm_status": get_public_llm_status(),
+                "fallback_reason": last_reason,
+            }
+        if not parsed or not isinstance(parsed.get("answer"), str) or not parsed["answer"].strip():
+            feedback = "上一轮输出不是符合 schema 的 JSON,请严格输出 answer 与 resource_claims 字段。"
+            last_reason = "schema_invalid"
+            continue
+        answer = parsed["answer"].strip()
+        claims = parsed.get("resource_claims") or []
+        if not isinstance(claims, list):
+            claims = []
+        grounded, reason = verify_resource_claims(answer, claims, state.get("tool_results", []))
+        if grounded:
+            return {
+                "final_response": answer,
+                "resource_claims": claims,
+                "response_source": "deepseek",
+                "llm_status": get_public_llm_status(),
+                "fallback_reason": None,
+            }
+        feedback = reason
+        last_reason = "grounding_rejected"
+
+    return {
+        "final_response": (
+            "抱歉,我无法基于当前已核实的数据给出可靠回答,以免提供未经证实的资源状态。"
+            "请补充明确的资源标识或稍后重试。"
+        ),
+        "response_source": "grounding_guard",
+        "llm_status": get_public_llm_status(),
+        "fallback_reason": last_reason,
+    }
 
 
 def memory_writer(state: CopilotState) -> CopilotState:
-    turn_summary = f"intent={state.get('intent')}; message={state.get('message')[:120]}; tools={[r.get('tool_name') for r in state.get('tool_results', [])]}"
+    turn_summary = f"message={state.get('message')[:120]}; tools={[r.get('tool_name') for r in state.get('tool_results', [])]}"
     write_conversation_summary(
         state["task_id"],
         state["user_id"],
@@ -573,50 +484,59 @@ def error_handler(state: CopilotState) -> CopilotState:
     return {"final_response": f"请求处理失败：{state.get('error')}"}
 
 
-def route_after_guardrail(state: CopilotState) -> Literal["hitl_interrupt", "tool_executor", "response_generator"]:
+def route_after_guardrail(state: CopilotState) -> Literal["hitl_interrupt", "tool_executor", "llm_responder"]:
     if state.get("error"):
-        return "response_generator"
+        return "llm_responder"
     if state.get("hitl_required"):
         return "hitl_interrupt"
     if state.get("tool_calls_proposed"):
         return "tool_executor"
-    return "response_generator"
+    return "llm_responder"
 
 
-def route_after_hitl(state: CopilotState) -> Literal["tool_executor", "response_generator"]:
-    return "tool_executor" if state.get("hitl_approved") else "response_generator"
+def route_after_hitl(state: CopilotState) -> Literal["tool_executor", "llm_responder"]:
+    return "tool_executor" if state.get("hitl_approved") else "llm_responder"
 
 
 def build_graph():
     builder = StateGraph(CopilotState)
     for name, fn in [
-        ("intent_classifier", intent_classifier),
         ("context_loader", context_loader),
         ("memory_retriever", memory_retriever),
-        ("planner", planner),
+        ("llm_router", llm_router),
         ("guardrail", guardrail),
         ("hitl_interrupt", hitl_interrupt),
         ("tool_executor", tool_executor),
-        ("response_generator", response_generator),
+        ("llm_responder", llm_responder),
         ("memory_writer", memory_writer),
         ("error_handler", error_handler),
     ]:
         builder.add_node(name, fn)
-    builder.set_entry_point("intent_classifier")
-    builder.add_edge("intent_classifier", "context_loader")
+    builder.set_entry_point("context_loader")
     builder.add_edge("context_loader", "memory_retriever")
-    builder.add_edge("memory_retriever", "planner")
-    builder.add_edge("planner", "guardrail")
+    builder.add_edge("memory_retriever", "llm_router")
+    builder.add_edge("llm_router", "guardrail")
     builder.add_conditional_edges("guardrail", route_after_guardrail)
     builder.add_conditional_edges("hitl_interrupt", route_after_hitl)
-    builder.add_edge("tool_executor", "response_generator")
-    builder.add_edge("response_generator", "memory_writer")
+    builder.add_edge("tool_executor", "llm_responder")
+    builder.add_edge("llm_responder", "memory_writer")
     builder.add_edge("memory_writer", END)
     return builder.compile(checkpointer=get_checkpointer())
 
 
 _graph = None
 _graph_lock = threading.Lock()
+_CONVERSATION_LOCKS = tuple(threading.RLock() for _ in range(64))
+
+
+class PendingApprovalError(RuntimeError):
+    def __init__(self, approval_id: str):
+        self.approval_id = approval_id
+        super().__init__(f"会话存在待审批任务 {approval_id}，请先处理该审批")
+
+
+def _conversation_lock(conversation_id: str) -> threading.RLock:
+    return _CONVERSATION_LOCKS[hash(conversation_id) % len(_CONVERSATION_LOCKS)]
 
 
 def get_graph():
@@ -646,6 +566,7 @@ def _format_result(state: dict[str, Any], conversation_id: str) -> dict[str, Any
         "answer": answer,
         "tool_calls": state.get("tool_calls_proposed", []),
         "tool_results": state.get("tool_results", []),
+        "resource_claims": state.get("resource_claims", []),
         "blocked_reason": state.get("error"),
         "plan": state.get("plan", []),
         "plan_source": state.get("plan_source", "unknown"),
@@ -653,6 +574,14 @@ def _format_result(state: dict[str, Any], conversation_id: str) -> dict[str, Any
         "retrieved_history": state.get("retrieved_history", []),
         "summary": state.get("conversation_summary", ""),
         "memory_summary": state.get("summary", ""),
+        "response_source": state.get("response_source", "unavailable"),
+        "llm_status": state.get("llm_status", get_public_llm_status()),
+        "fallback_reason": state.get("fallback_reason"),
+        "step_budget_hit": state.get("step_budget_hit", False),
+        "context": {
+            **state.get("context_metrics", {}),
+            "working_context": state.get("working_context", {}),
+        },
         "hitl_required": bool(approval_payload) or state.get("hitl_required", False),
         "approval": approval_payload,
     }
@@ -666,43 +595,62 @@ def run_copilot(
     user_id: str = "demo-user",
     tenant_id: str = "demo-tenant",
 ) -> dict[str, Any]:
+    reset_llm_request_status()
     conversation_id = conversation_id or f"conversation-{uuid4()}"
-    stored_messages, stored_summary = memory_db.load_conversation(conversation_id, user_id, tenant_id)
-    task_id = str(uuid4())
-    config = {"configurable": {"thread_id": conversation_id}}
-    state = get_graph().invoke({
-        "messages": stored_messages,
-        "message": message,
-        "intent": "",
-        "task_id": task_id,
-        "conversation_id": conversation_id,
-        "user_id": user_id,
-        "user_roles": roles or ["readonly"],
-        "tenant_id": tenant_id,
-        "conversation_summary": stored_summary,
-        "recent_messages": [],
-        "alert_payload": None,
-        "resource_snapshot": None,
-        "retrieved_docs": [],
-        "retrieved_history": [],
-        "plan": [],
-        "plan_source": "pending",
-        "tool_calls_proposed": [],
-        "tool_results": [],
-        "execution_log": [],
-        "hitl_required": False,
-        "hitl_approved": None,
-        "final_response": "",
-        "summary": "",
-        "error": None,
-    }, config=config)
-    return _format_result(state, conversation_id)
+    with _conversation_lock(conversation_id):
+        pending = approval_store.get_pending_for_conversation(conversation_id, user_id, tenant_id)
+        if pending:
+            raise PendingApprovalError(pending["id"])
+        stored_messages, stored_summary = memory_db.load_conversation(conversation_id, user_id, tenant_id)
+        task_id = str(uuid4())
+        config = {"configurable": {"thread_id": task_id}}
+        state = get_graph().invoke({
+            "messages": stored_messages,
+            "message": message,
+            "intent": "",
+            "task_id": task_id,
+            "conversation_id": conversation_id,
+            "user_id": user_id,
+            "user_roles": roles or ["readonly"],
+            "tenant_id": tenant_id,
+            "conversation_summary": stored_summary,
+            "recent_messages": [],
+            "relevant_messages": [],
+            "working_context": {},
+            "context_metrics": {},
+            "alert_payload": None,
+            "resource_snapshot": None,
+            "retrieved_docs": [],
+            "retrieved_history": [],
+            "plan": [],
+            "plan_source": "pending",
+            "tool_calls_proposed": [],
+            "tool_results": [],
+            "execution_log": [],
+            "hitl_required": False,
+            "hitl_approved": None,
+            "final_response": "",
+            "resource_claims": [],
+            "response_source": "pending",
+            "llm_available": True,
+            "step_budget_hit": False,
+            "llm_status": get_public_llm_status(),
+            "fallback_reason": None,
+            "summary": "",
+            "error": None,
+        }, config=config)
+        return _format_result(state, conversation_id)
 
 
-def resume_copilot(conversation_id: str, approved: bool, approver: str, reason: str = "") -> dict[str, Any]:
-    config = {"configurable": {"thread_id": conversation_id}}
-    state = get_graph().invoke(
-        Command(resume={"approved": approved, "approver": approver, "reason": reason}),
-        config=config,
-    )
-    return _format_result(state, conversation_id)
+def resume_copilot(checkpoint_thread_id: str, approved: bool, approver: str, reason: str = "") -> dict[str, Any]:
+    reset_llm_request_status()
+    approval = approval_store.get_by_task(checkpoint_thread_id)
+    if not approval:
+        raise KeyError(checkpoint_thread_id)
+    with _conversation_lock(approval["conversation_id"]):
+        config = {"configurable": {"thread_id": checkpoint_thread_id}}
+        state = get_graph().invoke(
+            Command(resume={"approved": approved, "approver": approver, "reason": reason}),
+            config=config,
+        )
+        return _format_result(state, approval["conversation_id"])

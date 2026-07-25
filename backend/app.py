@@ -8,15 +8,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from time import perf_counter
 
-from backend.agent.copilot import close_graph_runtime, get_graph, resume_copilot, run_copilot
+from backend.agent.copilot import (
+    PendingApprovalError,
+    close_graph_runtime,
+    get_graph,
+    resume_copilot,
+    run_copilot,
+)
+from backend.agent.llm import get_public_llm_status
 from backend.guardrails.approvals import approval_store
+from backend.guardrails.chat_limits import chat_limiter
 from backend.mcp.auth import DEMO_MODE, AuthContext, get_auth_context, issue_demo_token
 from backend.memory.store import list_memory_writes
 from backend.memory.database import memory_db
 from backend.mcp.schemas import GatewayToolRequest, ToolRequest
 from backend.mcp.tools import TOOL_REGISTRY, call_tool
-from backend.mock.repository import repo
 from backend.mock.api import router as mock_router
+from backend.providers import repo, runtime_config
 from backend.observability import APPROVAL_DECISIONS, HTTP_LATENCY, HTTP_REQUESTS, INTENT_COUNT, create_metrics_app
 from backend.memory.retriever import ensure_knowledge_seeded
 
@@ -24,7 +32,7 @@ from backend.memory.retriever import ensure_knowledge_seeded
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    message: str
+    message: str = Field(min_length=1, max_length=8000)
     conversation_id: str | None = None
 
 
@@ -64,7 +72,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.include_router(mock_router)
+if runtime_config.expose_mock_api:
+    app.include_router(mock_router)
 metrics_app = create_metrics_app()
 if metrics_app is not None:
     app.mount("/metrics", metrics_app)
@@ -90,9 +99,19 @@ def health():
     return {"status": "ok", "service": "dcs-copilot-demo"}
 
 
+@app.get("/api/llm-status")
+def llm_status(_auth: AuthContext = Depends(get_auth_context)):
+    return get_public_llm_status(aggregate=True)
+
+
 @app.get("/api/overview")
 def overview():
     return repo.overview()
+
+
+@app.get("/api/platform-status")
+def platform_status():
+    return repo.platform_status()
 
 
 @app.get("/api/tools")
@@ -130,16 +149,28 @@ def tool_call(request: GatewayToolRequest, auth: AuthContext = Depends(get_auth_
 
 @app.post("/api/chat")
 def chat(request: ChatRequest, auth: AuthContext = Depends(get_auth_context)):
-    try:
-        result = run_copilot(
-            message=request.message,
-            roles=auth.roles,
-            conversation_id=request.conversation_id,
-            user_id=auth.user_id,
-            tenant_id=auth.tenant_id,
+    lease = chat_limiter.try_acquire(auth.user_id, auth.tenant_id)
+    if lease is None:
+        raise HTTPException(
+            status_code=429,
+            detail="请求过于频繁或当前并发已满，请稍后重试",
+            headers={"Retry-After": "10"},
         )
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail="会话不属于当前用户或租户") from exc
+    try:
+        try:
+            result = run_copilot(
+                message=request.message,
+                roles=auth.roles,
+                conversation_id=request.conversation_id,
+                user_id=auth.user_id,
+                tenant_id=auth.tenant_id,
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail="会话不属于当前用户或租户") from exc
+        except PendingApprovalError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        lease.release()
     INTENT_COUNT.labels(result.get("intent") or "unknown").inc()
     return result
 
@@ -187,7 +218,7 @@ def decide_approval(
         }
     try:
         result = resume_copilot(
-            approval["conversation_id"],
+            approval["task_id"],
             request.approved,
             auth.user_id,
             request.reason,

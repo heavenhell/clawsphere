@@ -1,0 +1,1 @@
+"""Real northbound platform adapters."""
