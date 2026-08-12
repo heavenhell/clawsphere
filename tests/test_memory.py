@@ -4,7 +4,7 @@ from inspect import signature
 from backend.memory.context_manager import TOKEN_THRESHOLD, estimate_tokens, manage_context_window
 from backend.memory.database import MemoryDatabase
 from backend.memory.retriever import retrieve, retrieve_history, retrieve_tools
-from backend.mcp.tools import TOOL_REGISTRY
+from backend.mcp.tools import TOOL_REGISTRY, tool_catalog_tier1
 from backend.skills.loader import (
     SkillDocument,
     list_skills_for_roles,
@@ -115,6 +115,19 @@ def test_tool_catalog_search_returns_full_schemas_for_candidates_only():
     assert candidate_names == schema_names
     assert "list_alarms" in candidate_names
     assert all("parameters" in item["function"] for item in result["selected_tool_schemas"])
+
+
+def test_tool_catalog_tier1_excludes_unauthorized_tools():
+    readonly_catalog = tool_catalog_tier1(["readonly"])
+    admin_catalog = tool_catalog_tier1(["admin"])
+    for write_tool in ("restart_vm", "scale_cluster", "modify_ha_policy"):
+        assert write_tool not in readonly_catalog
+        assert write_tool in admin_catalog
+    assert "list_alarms" in readonly_catalog
+    # No parameter schema — only name/category/description lines.
+    assert "{" not in readonly_catalog and "parameters" not in readonly_catalog
+    assert readonly_catalog.count("\n") + 1 < len(TOOL_REGISTRY)  # fewer lines than the full (unfiltered) set
+    assert admin_catalog.count("\n") + 1 == len(TOOL_REGISTRY)  # admin sees every tool
 
 
 def test_conversation_survives_database_reopen(tmp_path):

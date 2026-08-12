@@ -413,3 +413,73 @@ def test_llm_responder_preserves_upstream_fallback_reason_instead_of_overwriting
     bare_state = {"message": "test", "llm_available": False}
     bare_result = copilot.llm_responder(bare_state)
     assert bare_result["fallback_reason"] == "llm_not_configured"
+
+
+def test_use_tool_directly_skips_skill_loader_but_reaches_tool_search(monkeypatch):
+    """No Skill covers the request, but skill_router can see the tool tier1
+    catalog and recognizes list_alarms fits — it should skip skill_loader
+    entirely and go straight into the normal tool-search/tool-call pipeline."""
+    order: list[str] = []
+
+    def spy_skill_router(*args, **kwargs):
+        order.append("skill_router")
+        return {
+            "decision": "use_tool_directly",
+            "skill_ids": [],
+            "arguments": {},
+            "confidence": 0.85,
+            "missing_context": [],
+            "reason_summary": "没有对应 Skill，但工具目录里有 list_alarms",
+        }
+
+    def spy_tool_search(*args, **kwargs):
+        order.append("tool_search_planner")
+        return {
+            "tool_calls": [{
+                "tool_name": "ToolSearch",
+                "params": {"query": "list_alarms", "top_k": 5, "required_capabilities": []},
+            }],
+            "reason": "test stub",
+        }
+
+    def spy_tool_call(*args, **kwargs):
+        order.append("tool_call_planner")
+        return {"tool_calls": [{"tool_name": "list_alarms", "params": {}}], "reason": "test stub"}
+
+    monkeypatch.setattr(copilot, "_call_skill_router", spy_skill_router)
+    monkeypatch.setattr(copilot, "_call_tool_search_planner", spy_tool_search)
+    monkeypatch.setattr(copilot, "_call_tool_call_planner", spy_tool_call)
+    result = run_copilot("现在有哪些告警", ["readonly"])
+    assert order == ["skill_router", "tool_search_planner", "tool_call_planner"]
+    assert result["skill_decision"]["decision"] == "use_tool_directly"
+    # skill_loader never ran on this path, so loaded_skills stayed at its
+    # initial empty value — visible here via the synthesized retrieved_docs.
+    assert result["retrieved_docs"] == []
+
+
+def test_use_tool_directly_still_enforces_full_safety_spine(monkeypatch):
+    """Skipping Skill selection must not skip any safety check: the
+    use_tool_directly path still goes through the same RBAC-filtered
+    tool_catalog_search -> guardrail -> tool_executor spine as use_skill."""
+    monkeypatch.setattr(copilot, "_call_skill_router", lambda *args, **kwargs: {
+        "decision": "use_tool_directly",
+        "skill_ids": [],
+        "arguments": {},
+        "confidence": 0.8,
+        "missing_context": [],
+        "reason_summary": "test stub",
+    })
+    monkeypatch.setattr(copilot, "_call_tool_search_planner", lambda *args, **kwargs: {
+        "tool_calls": [{
+            "tool_name": "ToolSearch",
+            "params": {"query": "list_alarms", "top_k": 5, "required_capabilities": []},
+        }],
+        "reason": "test stub",
+    })
+    monkeypatch.setattr(copilot, "_call_tool_call_planner", lambda *args, **kwargs: {
+        "tool_calls": [{"tool_name": "restart_vm", "params": _RESTART}],
+        "reason": "model proposed an unauthorized tool despite no Skill guidance",
+    })
+    result = run_copilot("帮我重启 dcs-app-01", ["readonly"])
+    assert not result["tool_results"]
+    assert "无权调用工具" in result["answer"]

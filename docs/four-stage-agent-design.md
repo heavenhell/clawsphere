@@ -2,7 +2,11 @@
 
 > 本文档描述**已实现**的系统，是 [four-stage-agent-architecture-proposal.md](./four-stage-agent-architecture-proposal.md)（评审方案）和 [four-stage-implementation-plan.md](./four-stage-implementation-plan.md)（分步实施计划）落地后的最终状态。三份文档的关系：**提案回答"为什么这么改"，实施计划回答"分几步改"，本文档回答"现在系统长什么样、边界在哪里"**。
 >
-> 配套完成了一轮设计/约束核对（见第七节），修复了核对中发现的 3 个问题，其余差异已在第八节列为已知限制。全部 96 个测试通过，且在任意文件执行顺序下稳定（含逆序、单文件、全量四种组合的交叉验证）。
+> 配套完成了一轮设计/约束核对（见第七节），修复了核对中发现的 3 个问题，其余差异已在第八节列为已知限制。
+>
+> **变更记录**：在这版核对通过之后，又追加了一版修订——[skill-router-tool-fallback-plan.md](./skill-router-tool-fallback-plan.md)：给 LLM1（`skill_router`）加了工具目录的 tier1 可见性（仅名字+分类+一句话描述，不含参数 schema），并给它的决策契约加了第四个值 `use_tool_directly`，让"没有 Skill 覆盖，但工具目录里能看出需要哪类数据"的请求不再必须先命中 Skill 才能碰到工具。本文档已经是**合并了这次修订之后**的状态，不再单独区分"修订前/修订后"。
+>
+> 全部 99 个测试通过，且在任意文件执行顺序下稳定（含逆序、单文件、全量四种组合的交叉验证）。
 
 ## 一、系统边界
 
@@ -21,16 +25,19 @@ sequenceDiagram
     H->>H: context_loader（上下文窗口管理）
     H->>H: history_retriever（历史案例 BM25）
 
-    H->>L: LLM1 skill_router（Skill一句话目录）
+    H->>L: LLM1 skill_router（Skill一句话目录 + 工具tier1目录:名字+分类+一句话描述）
     L-->>H: {decision, skill_ids, confidence, reason_summary}
 
-    alt decision != use_skill 或 skill_ids 为空
+    alt decision == direct_answer 或 clarification_required
         H->>H: 短路 → llm_responder
-    else use_skill
-        H->>T: skill_loader（按ID精确加载）
-        T-->>H: 完整 Skill 内容（tier2+3）
+    else decision == use_skill 或 use_tool_directly
+        opt decision == use_skill
+            H->>T: skill_loader（按ID精确加载）
+            T-->>H: loaded_skills（可能为空——ID解析失败/角色不匹配会被静默丢弃，不短路）
+        end
+        note over H,L: use_tool_directly 没有这一步，Skill 上下文为空，直接往下走
 
-        H->>L: LLM2 tool_search_planner（ToolSearch元工具）
+        H->>L: LLM2 tool_search_planner（ToolSearch元工具 + 可能为空的Skill上下文）
         L-->>H: {query, top_k, required_capabilities}
 
         alt 未调用 ToolSearch 或校验失败
@@ -43,14 +50,18 @@ sequenceDiagram
                 H->>H: 短路 → llm_responder
             else 有候选
                 H->>L: LLM3 tool_call_planner（候选Schema）
-                L-->>H: tool_calls[]
+                L-->>H: tool_calls[]（即使有候选，也可能一个都不选）
 
                 H->>H: guardrail（RBAC+offered-set+参数+限流）
-                opt 需要审批
-                    H->>H: hitl_interrupt（暂停等待人工）
+                alt tool_calls为空 或 guardrail全部拒绝(error)
+                    H->>H: 短路 → llm_responder（不进tool_executor，MCP不被调用）
+                else 至少一条通过
+                    opt 需要审批
+                        H->>H: hitl_interrupt（暂停等待人工）
+                    end
+                    H->>T: tool_executor（authorization_epoch复检+执行）
+                    T-->>H: tool_results
                 end
-                H->>T: tool_executor（authorization_epoch复检+执行）
-                T-->>H: tool_results
             end
         end
     end
@@ -63,13 +74,15 @@ sequenceDiagram
 
 标准工具路径（用户消息需要真实数据）观察到 **3 次规划 LLM 调用 + 1 次回答 LLM 调用 = 4 次**。寒暄/身份/概念问题在 LLM1 后直接短路，只有 1 次规划调用 + 1 次回答调用。这是设计上的差异化路径，不是退化。
 
+**"没有值"从不是错误状态**，是每一步都合法的路径：`skill_loader` 一个 Skill 都没解析出来 → 不短路，带着空上下文继续；`tool_catalog_search` 没候选、`tool_call_planner` 有候选但一个都不选、或 `guardrail` 把提议的工具全部拒绝（RBAC/offered-set/参数/限流任一失败）→ 这三种都直接跳到 `llm_responder`，`tool_executor`（对应图里的 MCP/`TOOL_REGISTRY` 执行）完全不会被调用。Responder 拿到空 `tool_results` 照样要回答，只是 `verify_resource_claims` 会挡掉任何没有工具数据支撑的资源状态断言（`copilot.py:671`），逼它要么诚实说"没有数据"，要么把内容降级成"举例"而不是"当前状态"。四条短路边对应的路由函数：`route_after_skill_router`（`copilot.py:451`）、`route_after_tool_search`（`copilot.py:507`）、`route_after_tool_catalog_search`（`copilot.py:513`）、`route_after_guardrail`（`copilot.py:885`）。
+
 ## 三、图节点一览
 
 | 节点 | 文件位置 | 类型 | 职责 |
 |---|---|---|---|
 | `context_loader` | `copilot.py:305` | 宿主 | 上下文窗口管理（六轮滚动摘要），不变 |
 | `history_retriever` | `copilot.py:334` | 宿主 | 仅检索历史案例（`retrieve_history`），不再检索 Skill |
-| `skill_router` | `copilot.py:403` | **LLM1** | 角色过滤后的 Skill 一句话目录 → `{decision, skill_ids, ...}` |
+| `skill_router` | `copilot.py:403` | **LLM1** | 角色过滤后的 Skill 一句话目录 + 工具 tier1 目录 → `{decision, skill_ids, ...}` |
 | `skill_loader` | `copilot.py:347` | 宿主 | 按 `skill_id` 精确加载完整内容，二次角色校验 |
 | `tool_search_planner` | `copilot.py:460` | **LLM2** | 完整 Skill 内容 → 合成的 `ToolSearch` 工具调用 |
 | `tool_catalog_search` | `copilot.py:376` | 宿主 | RBAC 过滤 → BM25 排序 → 候选工具完整 Schema |
@@ -104,8 +117,9 @@ Skill 决策链         skill_decision, selected_skill_ids, loaded_skills, skill
 
 ### LLM1 — `skill_router`（`SKILL_ROUTER_PROMPT`, `copilot.py:110`）
 
-- 输入：`IDENTITY_BLOCK` + 角色过滤后的 Skill 目录（`skill_catalog_tier1(roles)`，每次调用现算，不是模块加载时固定的常量）+ 会话摘要 + 最近 6 条消息 + 当前消息。**不包含任何工具信息**。
-- 输出 JSON：`decision ∈ {use_skill, direct_answer, clarification_required}`、`skill_ids`、`arguments`、`confidence`、`missing_context`、`reason_summary`。
+- 输入：`IDENTITY_BLOCK` + 角色过滤后的 Skill 目录（`skill_catalog_tier1(roles)`）+ 角色过滤后的**工具 tier1 目录**（`tool_catalog_tier1(roles)`，`tools.py`，只有工具名+分类+一句话描述，**不含参数 schema**）+ 会话摘要 + 最近 6 条消息 + 当前消息。两个目录都是每次调用现算，不是模块加载时固定的常量。
+- 输出 JSON：`decision ∈ {use_skill, use_tool_directly, direct_answer, clarification_required}`、`skill_ids`（仅 `use_skill` 有意义）、`arguments`、`confidence`、`missing_context`、`reason_summary`。
+  - `use_tool_directly`：没有 Skill 覆盖这个请求，但工具目录里能看出需要哪类数据，跳过 `skill_loader` 直接进入 `tool_search_planner`（LLM2），走跟 `use_skill` 完全相同的后半程（工具检索 → 工具调用 → 护栏 → 执行），只是 Skill 上下文为空。这条路径存在的原因：Skill 一句话摘要不一定覆盖所有能用工具回答的问题（例如当前 4 个 Skill 都没提写操作和 eDME），在此之前"没命中 Skill"等于"这轮请求永远碰不到任何工具"，现在多一条不依赖 Skill 目录覆盖面的兜底路径。
 - 失败关闭：JSON 无法解析 / `decision` 非法 / `use_skill` 但 `skill_ids` 为空 → 全部归一为 `direct_answer`（`plan_source="skill_router_fallback"`），不重试。
 
 ### 宿主 — `skill_loader`
@@ -134,14 +148,17 @@ Skill 决策链         skill_decision, selected_skill_ids, loaded_skills, skill
 
 ## 六、安全设计
 
-四层独立检查，任何一层被绕过都不影响其余层：
+五层独立检查，任何一层被绕过都不影响其余层：
 
 ```text
 1. skill_catalog_tier1(roles)     Skill 目录生成前过滤 —— 未授权 Skill 连一句话摘要都进不了 LLM1 的 Prompt
-2. retrieve_tools() RBAC 预过滤    工具检索前过滤 —— 未授权工具连候选都进不了，更不会被 LLM3 看到
-3. guardrail 的 offered-set 检查   执行前过滤 —— 哪怕 LLM3 凭空提议了一个未被检索到的工具，也会被拒绝
-4. guardrail/tool_executor 的 RBAC 检查（原有逻辑）—— 独立于第 2/3 层，双重保险
+2. tool_catalog_tier1(roles)      工具tier1目录生成前过滤 —— 未授权工具连名字都进不了 LLM1 的 Prompt（跟第1层同一原则,新增）
+3. retrieve_tools() RBAC 预过滤    工具检索前过滤 —— 未授权工具连候选都进不了，更不会被 LLM3 看到
+4. guardrail 的 offered-set 检查   执行前过滤 —— 哪怕 LLM3 凭空提议了一个未被检索到的工具，也会被拒绝
+5. guardrail/tool_executor 的 RBAC 检查（原有逻辑）—— 独立于第 3/4 层，双重保险
 ```
+
+`use_tool_directly` 路径特别验证过第 4/5 层不会被绕过：`test_use_tool_directly_still_enforces_full_safety_spine` 让 LLM3 在没有 Skill 引导的情况下"提议"一个未授权工具，跟 `use_skill` 路径一样被 RBAC 检查拦下——跳过 Skill 选择这一步，不等于跳过任何安全检查。
 
 第 3 层是本次新增的加固（`validate_tool_calls` 的 `allowed_tool_names` 参数，`policy.py:43`），插在**现有 RBAC 检查之后**，所以"角色无权调用"这条错误信息的触发时机不受影响（`test_llm_tool_plan_still_passes_rbac` 验证了这一点）。
 
@@ -182,17 +199,17 @@ Skill 决策链         skill_decision, selected_skill_ids, loaded_skills, skill
 ## 九、测试覆盖
 
 ```text
-tests/test_hitl.py                 19 个 —— HITL/RBAC/审批/epoch/预算/短路/调用顺序
-tests/test_security_regressions.py 31 个 —— 安全回归、offered-set、MCP注册漂移、字符集限制等
-tests/test_memory.py               24 个 —— Skill加载、BM25（含新的工具BM25）、responder payload
+tests/test_hitl.py                 18 个 —— HITL/RBAC/审批/epoch/预算/短路/调用顺序/use_tool_directly
+tests/test_security_regressions.py 30 个 —— 安全回归、offered-set、MCP注册漂移、字符集限制等
+tests/test_memory.py               24 个 —— Skill加载、BM25（含工具BM25）、responder payload、工具tier1目录
 tests/test_gateway.py              16 个 —— 网关/API 层，未直接触及本次改动
 tests/test_platform_config.py       8 个 —— 平台配置，未直接触及本次改动
 tests/test_eval_semantic.py         3 个 —— 语义评估基础设施，未直接触及本次改动
 --------------------------------------------------
-合计                                96 个，全部通过；单文件、全量、正序、逆序四种执行顺序交叉验证一致
+合计                                99 个，全部通过；单文件、全量、正序、逆序四种执行顺序交叉验证一致
 ```
 
-新增测试里，`test_llm1_then_llm2_then_llm3_call_order_on_the_full_tool_path`、`test_direct_answer_short_circuit_never_calls_tool_search_or_tool_call_planner`、`test_unauthorized_tool_never_becomes_a_search_candidate`、`test_tool_call_outside_offered_candidates_is_rejected_by_guardrail`、`test_authorization_epoch_invalidates_stale_write_after_catalog_change` 五个是直接对应第七节验收标准的行为级测试，而不是单纯的实现细节测试。
+代表性测试（对应第七节验收标准和 `use_tool_directly` 修订的行为级测试，不是单纯的实现细节测试）：`test_llm1_then_llm2_then_llm3_call_order_on_the_full_tool_path`、`test_direct_answer_short_circuit_never_calls_tool_search_or_tool_call_planner`、`test_unauthorized_tool_never_becomes_a_search_candidate`、`test_tool_call_outside_offered_candidates_is_rejected_by_guardrail`、`test_authorization_epoch_invalidates_stale_write_after_catalog_change`、`test_tool_catalog_tier1_excludes_unauthorized_tools`、`test_use_tool_directly_skips_skill_loader_but_reaches_tool_search`、`test_use_tool_directly_still_enforces_full_safety_spine`。
 
 ## 十、模块变更清单（供代码审查按文件定位）
 
@@ -202,8 +219,10 @@ backend/agent/llm.py           +get_last_llm_usage()，去掉未用的 call_deep
 backend/agent/identity.py      拆出 identity_block() 作为四阶段共享前缀
 backend/skills/loader.py       +按ID加载、角色过滤、目录版本/重载
 backend/memory/retriever.py    +retrieve_tools()（工具BM25），去掉死代码 retrieve_skill_detail()
-backend/mcp/tools.py           ToolSpec +category/tags，+TOOL_CATALOG_VERSION
+backend/mcp/tools.py           ToolSpec +category/tags，+TOOL_CATALOG_VERSION，+tool_catalog_tier1()
 backend/mcp/schemas.py         +ToolSearchRequest（含字符集限制）
 backend/mcp/mcp_server.py      补齐 list_clusters/get_vm_detail 两个缺失注册
 backend/guardrails/policy.py   validate_tool_calls +allowed_tool_names（offered-set）
 ```
+
+`tool_catalog_tier1()` 和 `skill_router`/`route_after_skill_router` 里 `use_tool_directly` 分支是 [skill-router-tool-fallback-plan.md](./skill-router-tool-fallback-plan.md) 那次修订加的，其余都是四阶段主改造的部分。

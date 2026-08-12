@@ -26,7 +26,7 @@ from backend.agent.identity import build_system_prompt, identity_block
 from backend.guardrails.approvals import approval_store
 from backend.guardrails.policy import risk_for_tool, validate_tool_calls
 from backend.mcp.schemas import ToolRequest, ToolSearchRequest
-from backend.mcp.tools import TOOL_CATALOG_VERSION, TOOL_REGISTRY, call_tool
+from backend.mcp.tools import TOOL_CATALOG_VERSION, TOOL_REGISTRY, call_tool, tool_catalog_tier1
 from backend.memory.context_manager import (
     RESOURCE_ID_PATTERN,
     deterministic_summary,
@@ -109,13 +109,15 @@ IDENTITY_BLOCK = identity_block(DEEPSEEK_MODEL)
 
 SKILL_ROUTER_PROMPT = f"""{IDENTITY_BLOCK}
 
-当前阶段:Skill 选择。根据完整对话和下面按角色过滤后的 Skill 目录(仅一句话摘要),判断:
+当前阶段:Skill 选择。根据完整对话、下面按角色过滤后的 Skill 目录(仅一句话摘要)、以及下面按角色过滤后的
+工具目录(仅工具名+分类+一句话描述,不含参数 schema),判断:
 - 是否需要使用某个 Skill 的完整流程来处理这个请求;
+- 还是没有 Skill 覆盖,但工具目录里能看出需要哪类数据,可以直接进入工具检索;
 - 还是可以直接回答(寒暄/身份/概念说明,不需要实时数据);
 - 还是信息不足,需要用户澄清(缺少必要的资源标识等)。
 
 必须严格输出 JSON,字段:
-- "decision": "use_skill" | "direct_answer" | "clarification_required"
+- "decision": "use_skill" | "use_tool_directly" | "direct_answer" | "clarification_required"
 - "skill_ids": 数组,decision=use_skill 时填入目录中实际存在的 Skill id(一般 1 个即可)
 - "arguments": 对象,附加给后续阶段的线索(如已知的资源 ID),没有就给空对象
 - "confidence": 0~1 之间的小数
@@ -124,12 +126,14 @@ SKILL_ROUTER_PROMPT = f"""{IDENTITY_BLOCK}
 
 规则:
 - 只能从给出的 Skill 目录中选择 id,不要编造不存在的 id。
-- 写操作(重启/扩容/迁移/修改/删除)如果对应某个 Skill 的标准流程,同样走 use_skill,是否执行由后续护栏和审批独立裁决。
+- 没有任何 Skill 覆盖这个请求时,不要因此就判成 direct_answer 或 clarification_required——先看工具目录里有没有对得上的工具,能对上就输出 use_tool_directly,交给下一阶段去精确检索。
+- 写操作(重启/扩容/迁移/修改/删除)如果对应某个 Skill 的标准流程,走 use_skill;没有对应 Skill 但工具目录里有对应的写操作,走 use_tool_directly;是否执行都由后续护栏和审批独立裁决,你无法绕过。
 - 追问("它呢""第二条""上面说的X")请结合历史自行消解指代。"""
 
 TOOL_SEARCH_PROMPT = f"""{IDENTITY_BLOCK}
 
-当前阶段:工具检索。你已经拿到下面这个 Skill 的完整内容。判断本轮是否需要调用真实工具获取数据:
+当前阶段:工具检索。你可能已经拿到一个 Skill 的完整内容;如果没有,说明这个请求不对应任何已知 Skill,
+你需要直接基于用户消息和历史判断需要什么数据。判断本轮是否需要调用真实工具获取数据:
 - 需要就调用 ToolSearch,给出简短的检索 query(用于在工具目录里做关键词检索)、期望返回的候选数量 top_k,以及可选的 required_capabilities 标签。
 - 不需要实时数据(纯概念/流程说明)就不要调用 ToolSearch。
 
@@ -233,6 +237,7 @@ def _skill_router_payload(state: CopilotState) -> str:
         "conversation_summary": state.get("conversation_summary", "")[:1500],
         "recent_messages": state.get("recent_messages", [])[-6:],
         "skill_catalog": skill_catalog_tier1(state["user_roles"]),
+        "tool_catalog": tool_catalog_tier1(state["user_roles"]),
     }
     return json.dumps(payload, ensure_ascii=False)
 
@@ -401,9 +406,10 @@ def tool_catalog_search(state: CopilotState) -> CopilotState:
 # --- Cognitive layer: three planning stages, each a single, narrow LLM call --
 
 def skill_router(state: CopilotState) -> CopilotState:
-    """LLM1: decide whether this turn needs a Skill's full procedure, a direct
-    answer, or clarification — seeing only role-filtered Skill one-liners, not
-    their full content and not the tool catalog at all."""
+    """LLM1: decide whether this turn needs a Skill's full procedure, can go
+    straight to tool search with no Skill, a direct answer, or clarification —
+    seeing only role-filtered Skill one-liners and role-filtered tool
+    name+description (tier1, no parameter schema)."""
     if _budget_exhausted(state):
         return {
             "skill_decision": {},
@@ -434,6 +440,8 @@ def skill_router(state: CopilotState) -> CopilotState:
     }
     if choice == "use_skill" and skill_ids:
         return {**base, "selected_skill_ids": skill_ids, "plan_source": "skill_router", "intent": "tool_execution"}
+    if choice == "use_tool_directly":
+        return {**base, "plan_source": "skill_router_use_tool_directly", "intent": "tool_execution"}
     if choice == "clarification_required":
         return {**base, "plan_source": "skill_router_clarification", "intent": "clarification_required"}
     if choice == "direct_answer":
@@ -448,12 +456,14 @@ def skill_router(state: CopilotState) -> CopilotState:
     }
 
 
-def route_after_skill_router(state: CopilotState) -> Literal["skill_loader", "llm_responder"]:
+def route_after_skill_router(state: CopilotState) -> Literal["skill_loader", "tool_search_planner", "llm_responder"]:
     if state.get("llm_available") is False:
         return "llm_responder"
     decision = state.get("skill_decision") or {}
     if decision.get("decision") == "use_skill" and decision.get("skill_ids"):
         return "skill_loader"
+    if decision.get("decision") == "use_tool_directly":
+        return "tool_search_planner"
     return "llm_responder"
 
 

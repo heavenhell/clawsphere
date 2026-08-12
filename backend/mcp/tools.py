@@ -377,6 +377,20 @@ def modify_ha_policy(cluster_id: str, policy: dict[str, Any], reason: str):
     return result
 
 
+def tool_catalog_tier1(roles: list[str]) -> str:
+    """Role-filtered, tier-1 tool listing: name + category + one-line
+    description only, no parameter schema. Mirrors skill_catalog_tier1()'s
+    role of giving skill_router (LLM1) enough to recognize "a tool could
+    answer this" without handing it full function-calling schemas — those
+    stay reserved for tool_call_planner (LLM3) after tool_catalog_search has
+    narrowed the candidate set."""
+    return "\n".join(
+        f"- {spec.name} ({spec.category}): {spec.description}"
+        for spec in TOOL_REGISTRY.values()
+        if any(role in spec.auth_roles for role in roles)
+    )
+
+
 def call_tool(request: ToolRequest) -> ToolResponse:
     started = perf_counter()
     audit_id = str(uuid4())

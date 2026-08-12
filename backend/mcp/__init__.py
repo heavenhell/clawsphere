@@ -15,6 +15,7 @@ __all__ = [
     "issue_demo_token",
     "main",
     "mcp",
+    "tool_catalog_tier1",
 ]
 
 
@@ -41,4 +42,6 @@ def __getattr__(name: str) -> Any:
         from backend.mcp.tools import TOOL_REGISTRY; return TOOL_REGISTRY
     if name == "call_tool":
         from backend.mcp.tools import call_tool; return call_tool
+    if name == "tool_catalog_tier1":
+        from backend.mcp.tools import tool_catalog_tier1; return tool_catalog_tier1
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
