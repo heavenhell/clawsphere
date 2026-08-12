@@ -32,6 +32,18 @@ _request_status: ContextVar[dict[str, Any] | None] = ContextVar(
     "dcs_llm_request_status",
     default=None,
 )
+_last_usage: ContextVar[dict[str, Any] | None] = ContextVar(
+    "dcs_llm_last_usage",
+    default=None,
+)
+
+
+def get_last_llm_usage() -> dict[str, Any] | None:
+    """Token usage from the most recent successful _invoke() call on this
+    request, or None — DeepSeek's response `usage` field isn't guaranteed by
+    every backend/mock, so callers must degrade gracefully rather than assert
+    it's present."""
+    return _last_usage.get()
 
 
 def _initial_status() -> dict[str, Any]:
@@ -313,6 +325,8 @@ def _invoke(payload: dict[str, Any]) -> dict[str, Any] | None:
             )
             raise RuntimeError("DeepSeek returned an invalid response") from exc
         _record_status("healthy", status_code=response.status_code)
+        usage = body.get("usage")
+        _last_usage.set(usage if isinstance(usage, dict) else None)
         return body
     response = getattr(last_error, "response", None)
     _record_status(
@@ -392,53 +406,6 @@ def call_deepseek_agent_plan(
             continue
         calls.append({"tool_name": function.get("name"), "params": arguments})
     return {"tool_calls": calls, "reason": choice.get("content") or ""}
-
-
-def call_deepseek_tool_plan(
-    message: str,
-    intent: str,
-    history: list[dict[str, str]],
-    retrieved_docs: list[dict[str, Any]],
-    tools: list[dict[str, Any]],
-) -> dict[str, Any] | None:
-    body = _invoke({
-        "model": DEEPSEEK_MODEL,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "你是运维任务规划器。只根据用户明确表达的对象和动作选择工具；"
-                    "缺少 VM、集群或告警标识时不要猜测资源，也不要调用工具。"
-                    "查询可组合多个只读工具；写操作只提出工具调用，执行由护栏和审批控制。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": json.dumps({
-                    "message": message,
-                    "intent": intent,
-                    "recent_history": history[-8:],
-                    "skills": retrieved_docs[:3],
-                }, ensure_ascii=False),
-            },
-        ],
-        "tools": tools,
-        "tool_choice": "auto",
-        "temperature": 0,
-        "max_tokens": 1000,
-    })
-    if not body:
-        return None
-    choice = body["choices"][0]["message"]
-    calls = []
-    for item in choice.get("tool_calls") or []:
-        function = item.get("function") or {}
-        try:
-            arguments = json.loads(function.get("arguments") or "{}")
-        except json.JSONDecodeError:
-            continue
-        calls.append({"tool_name": function.get("name"), "params": arguments})
-    return {"tool_calls": calls, "reason": choice.get("content") or "LLM structured tool plan"}
 
 
 def summarize_messages(messages: list[dict[str, str]]) -> str | None:

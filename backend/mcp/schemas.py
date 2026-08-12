@@ -94,6 +94,14 @@ class ModifyHaPolicyParams(ClusterCapacityParams):
     reason: str = Field(min_length=5, max_length=500)
 
 
+class ToolSearchRequest(ToolParams):
+    # Excludes control characters (incl. newlines) — this is a single-line BM25
+    # query, not free text; otherwise permissive of CJK/ASCII/punctuation.
+    query: str = Field(min_length=1, max_length=200, pattern=r"^[^\x00-\x1f\x7f]+$")
+    top_k: int = Field(default=5, ge=1, le=5)
+    required_capabilities: list[str] = Field(default_factory=list, max_length=10)
+
+
 class ToolRequest(BaseModel):
     tool_name: str
     params: dict[str, Any] = Field(default_factory=dict)

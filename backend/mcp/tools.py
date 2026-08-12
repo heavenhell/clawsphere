@@ -37,6 +37,12 @@ from backend.memory.database import memory_db
 from backend.observability import TOOL_CALLS, TOOL_LATENCY
 
 
+# Bumped manually whenever a tool's presence/definition changes materially.
+# Consumed by authorization_epoch() to detect a stale in-flight write across a
+# HITL pause.
+TOOL_CATALOG_VERSION = 1
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
@@ -45,6 +51,8 @@ class ToolSpec:
     auth_roles: list[str]
     input_model: type[ToolParams]
     fn: Callable[..., Any]
+    category: str
+    tags: list[str]
 
 
 TOOL_REGISTRY: dict[str, ToolSpec] = {}
@@ -56,6 +64,8 @@ def mcp_tool(
     input_model: type[ToolParams] = EmptyParams,
     risk: str = "none",
     auth_roles: list[str] | None = None,
+    category: str = "general",
+    tags: list[str] | None = None,
 ):
     def decorator(fn: Callable[..., Any]):
         TOOL_REGISTRY[name] = ToolSpec(
@@ -65,12 +75,14 @@ def mcp_tool(
             auth_roles=auth_roles or ["readonly", "ops", "admin"],
             input_model=input_model,
             fn=fn,
+            category=category,
+            tags=tags or [],
         )
         return fn
     return decorator
 
 
-@mcp_tool("list_alarms", "查询当前活动告警", AlarmListParams)
+@mcp_tool("list_alarms", "查询当前活动告警", AlarmListParams, category="alert", tags=["alarm", "fusioncompute"])
 def list_alarms(severity: str | None = None):
     alarms = [alarm for alarm in repo.alarms() if alarm.get("status") == "active"]
     if severity:
@@ -78,7 +90,12 @@ def list_alarms(severity: str | None = None):
     return alarms
 
 
-@mcp_tool("get_resource_overview", "查询 DCS/FusionCompute 资源总览")
+@mcp_tool(
+    "get_resource_overview",
+    "查询 DCS/FusionCompute 资源总览",
+    category="resource",
+    tags=["overview", "aggregate", "fusioncompute"],
+)
 def get_resource_overview():
     return {
         "overview": repo.overview(),
@@ -91,7 +108,13 @@ def get_resource_overview():
     }
 
 
-@mcp_tool("get_alarm_detail", "查询告警详情和关联资源", AlarmDetailParams)
+@mcp_tool(
+    "get_alarm_detail",
+    "查询告警详情和关联资源",
+    AlarmDetailParams,
+    category="alert",
+    tags=["alarm", "detail", "fusioncompute"],
+)
 def get_alarm_detail(alarm_id: str):
     alarm = next((a for a in repo.alarms() if a["id"] == alarm_id), None)
     if not alarm:
@@ -109,12 +132,18 @@ def get_alarm_detail(alarm_id: str):
     return {"alarm": alarm, "related": related}
 
 
-@mcp_tool("list_clusters", "查询集群列表和容量概览")
+@mcp_tool("list_clusters", "查询集群列表和容量概览", category="resource", tags=["cluster", "fusioncompute"])
 def list_clusters():
     return repo.clusters()
 
 
-@mcp_tool("get_cluster_capacity", "查询指定集群容量和风险", ClusterCapacityParams)
+@mcp_tool(
+    "get_cluster_capacity",
+    "查询指定集群容量和风险",
+    ClusterCapacityParams,
+    category="capacity",
+    tags=["cluster", "capacity", "fusioncompute"],
+)
 def get_cluster_capacity(cluster_id: str):
     cluster = next((c for c in repo.clusters() if c["id"] == cluster_id), None)
     if not cluster:
@@ -131,7 +160,7 @@ def get_cluster_capacity(cluster_id: str):
     }
 
 
-@mcp_tool("list_vms", "查询虚拟机列表", VmListParams)
+@mcp_tool("list_vms", "查询虚拟机列表", VmListParams, category="resource", tags=["vm", "fusioncompute"])
 def list_vms(status: str | None = None):
     vms = repo.vms()
     if status:
@@ -139,7 +168,13 @@ def list_vms(status: str | None = None):
     return vms
 
 
-@mcp_tool("get_vm_detail", "查询虚拟机详情、主机和关联告警", VmDetailParams)
+@mcp_tool(
+    "get_vm_detail",
+    "查询虚拟机详情、主机和关联告警",
+    VmDetailParams,
+    category="resource",
+    tags=["vm", "detail", "fusioncompute"],
+)
 def get_vm_detail(vm_id: str):
     vm = next((item for item in repo.vms() if item["id"] == vm_id or item["name"] == vm_id), None)
     if not vm:
@@ -148,7 +183,13 @@ def get_vm_detail(vm_id: str):
     return {"vm": vm, "host": host, "alarms": repo.alarms()}
 
 
-@mcp_tool("get_vm_metrics", "查询虚拟机性能指标", VmMetricsParams)
+@mcp_tool(
+    "get_vm_metrics",
+    "查询虚拟机性能指标",
+    VmMetricsParams,
+    category="performance",
+    tags=["vm", "metrics", "performance", "fusioncompute"],
+)
 def get_vm_metrics(vm_id: str, metric_names: list[str] | None = None, time_range: str = "1h"):
     detail = get_vm_detail(vm_id)
     if not detail:
@@ -160,7 +201,13 @@ def get_vm_metrics(vm_id: str, metric_names: list[str] | None = None, time_range
     return {"vm": vm, "time_range": time_range, "series": base}
 
 
-@mcp_tool("run_capacity_forecast", "基于 mock 历史指标预测容量风险", ForecastParams)
+@mcp_tool(
+    "run_capacity_forecast",
+    "基于 mock 历史指标预测容量风险",
+    ForecastParams,
+    category="capacity",
+    tags=["forecast", "capacity", "cluster"],
+)
 def run_capacity_forecast(cluster_id: str, forecast_days: int = 30):
     capacity = get_cluster_capacity(cluster_id)
     if not capacity:
@@ -178,22 +225,46 @@ def run_capacity_forecast(cluster_id: str, forecast_days: int = 30):
     }
 
 
-@mcp_tool("get_storage_pool_usage", "查询 Dorado 存储池容量和时延", StoragePoolParams)
+@mcp_tool(
+    "get_storage_pool_usage",
+    "查询 Dorado 存储池容量和时延",
+    StoragePoolParams,
+    category="resource",
+    tags=["storage", "dorado"],
+)
 def get_storage_pool_usage(pool_id: str | None = None):
     return repo.storage_pool_usage(pool_id)
 
 
-@mcp_tool("query_edme_current_alarms", "查询 eDME 运维面当前告警", EdmeAlarmParams)
+@mcp_tool(
+    "query_edme_current_alarms",
+    "查询 eDME 运维面当前告警",
+    EdmeAlarmParams,
+    category="alert",
+    tags=["alarm", "edme"],
+)
 def query_edme_current_alarms(severity: int | None = None, iterator: str | None = None):
     return repo.edme_current_alarms(severity, iterator)
 
 
-@mcp_tool("query_edme_resources", "查询 eDME 系统资源实例", EdmeResourceParams)
+@mcp_tool(
+    "query_edme_resources",
+    "查询 eDME 系统资源实例",
+    EdmeResourceParams,
+    category="resource",
+    tags=["edme", "resource"],
+)
 def query_edme_resources(class_name: str = "SYS_StorageDevice", page_no: int = 1, page_size: int = 20):
     return repo.edme_resource_instances(class_name, page_no, page_size)
 
 
-@mcp_tool("get_edme_metric_catalog", "查询 eDME 监控对象及性能指标目录", EdmeMetricCatalogParams)
+@mcp_tool(
+    "get_edme_metric_catalog",
+    "查询 eDME 监控对象及性能指标目录",
+    EdmeMetricCatalogParams,
+    category="performance",
+    tags=["edme", "metric", "catalog"],
+)
 def get_edme_metric_catalog(object_type_id: int | None = None):
     return {
         "object_types": repo.edme_object_types(),
@@ -201,7 +272,13 @@ def get_edme_metric_catalog(object_type_id: int | None = None):
     }
 
 
-@mcp_tool("query_edme_performance_history", "查询 eDME 历史性能数据", EdmeHistoryParams)
+@mcp_tool(
+    "query_edme_performance_history",
+    "查询 eDME 历史性能数据",
+    EdmeHistoryParams,
+    category="performance",
+    tags=["edme", "metric", "history"],
+)
 def query_edme_performance_history(
     object_ids: list[str] | None = None,
     indicator_ids: list[int] | None = None,
@@ -220,12 +297,22 @@ def query_edme_performance_history(
     ApprovalRequestParams,
     risk="none",
     auth_roles=["ops", "admin"],
+    category="admin",
+    tags=["approval", "write"],
 )
 def create_approval_request(title: str, description: str, tool_calls: list[dict[str, Any]]):
     return {"title": title, "description": description, "tool_calls": tool_calls}
 
 
-@mcp_tool("restart_vm", "重启指定虚拟机", RestartVmParams, risk="high", auth_roles=["ops", "admin"])
+@mcp_tool(
+    "restart_vm",
+    "重启指定虚拟机",
+    RestartVmParams,
+    risk="high",
+    auth_roles=["ops", "admin"],
+    category="admin",
+    tags=["vm", "write", "restart"],
+)
 def restart_vm(vm_id: str, reason: str, change_ticket_id: str):
     vm = next((item for item in repo.vms() if item["id"] == vm_id or item["name"] == vm_id), None)
     if not vm:
@@ -242,7 +329,15 @@ def restart_vm(vm_id: str, reason: str, change_ticket_id: str):
     return result
 
 
-@mcp_tool("scale_cluster", "调整集群目标主机数", ScaleClusterParams, risk="high", auth_roles=["admin"])
+@mcp_tool(
+    "scale_cluster",
+    "调整集群目标主机数",
+    ScaleClusterParams,
+    risk="high",
+    auth_roles=["admin"],
+    category="admin",
+    tags=["cluster", "write", "scale"],
+)
 def scale_cluster(cluster_id: str, target_hosts: int, reason: str):
     cluster = next((item for item in repo.clusters() if item["id"] == cluster_id), None)
     if not cluster:
@@ -259,7 +354,15 @@ def scale_cluster(cluster_id: str, target_hosts: int, reason: str):
     return result
 
 
-@mcp_tool("modify_ha_policy", "修改集群 HA 策略", ModifyHaPolicyParams, risk="high", auth_roles=["admin"])
+@mcp_tool(
+    "modify_ha_policy",
+    "修改集群 HA 策略",
+    ModifyHaPolicyParams,
+    risk="high",
+    auth_roles=["admin"],
+    category="admin",
+    tags=["cluster", "write", "ha"],
+)
 def modify_ha_policy(cluster_id: str, policy: dict[str, Any], reason: str):
     if not any(item["id"] == cluster_id for item in repo.clusters()):
         raise ValueError("集群不存在")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+from time import perf_counter
 from typing import Any, Literal, TypedDict
 from uuid import uuid4
 
@@ -12,26 +13,34 @@ from backend.agent.llm import (
     DEEPSEEK_MODEL,
     call_deepseek_agent_plan,
     call_deepseek_json,
+    get_last_llm_usage,
     get_llm_status,
     get_public_llm_status,
     reset_llm_request_status,
     summarize_messages,
 )
+from pydantic import ValidationError
+
 from backend.agent.checkpoint import close_checkpointer, get_checkpointer
-from backend.agent.identity import build_system_prompt
+from backend.agent.identity import build_system_prompt, identity_block
 from backend.guardrails.approvals import approval_store
 from backend.guardrails.policy import risk_for_tool, validate_tool_calls
-from backend.mcp.schemas import ToolRequest
-from backend.mcp.tools import TOOL_REGISTRY, call_tool
+from backend.mcp.schemas import ToolRequest, ToolSearchRequest
+from backend.mcp.tools import TOOL_CATALOG_VERSION, TOOL_REGISTRY, call_tool
 from backend.memory.context_manager import (
     RESOURCE_ID_PATTERN,
     deterministic_summary,
     manage_context_window,
 )
 from backend.memory.database import memory_db
-from backend.memory.retriever import retrieve, retrieve_history
+from backend.memory.retriever import retrieve_history, retrieve_tools
 from backend.memory.store import write_conversation_summary
-from backend.skills.loader import startup_skill_summaries
+from backend.skills.loader import (
+    load_skill_by_id,
+    skill_catalog_tier1,
+    skill_catalog_version,
+    startup_skill_summaries,
+)
 from backend.observability import observe_agent
 
 
@@ -39,6 +48,9 @@ from backend.observability import observe_agent
 # Death-loop / runaway guardrail: a single turn may execute at most this many
 # tool calls, no matter what the model proposes.
 MAX_TOOL_CALLS_PER_TURN = 8
+# Hard budget on total LLM calls per turn (4 planning/response stages today,
+# plus the responder's internal retries) so a bug can't loop indefinitely.
+MAX_LLM_CALLS_PER_TURN = 8
 
 
 class CopilotState(TypedDict, total=False):
@@ -57,10 +69,21 @@ class CopilotState(TypedDict, total=False):
     context_metrics: dict[str, Any]
     alert_payload: dict | None
     resource_snapshot: dict | None
-    retrieved_docs: list[dict]
-    retrieved_history: list[dict]
+    retrieved_cases: list[dict]
     plan: list[str]
     plan_source: str
+    skill_decision: dict[str, Any]
+    selected_skill_ids: list[str]
+    loaded_skills: list[dict[str, Any]]
+    skill_catalog_version: int
+    tool_search_request: dict[str, Any]
+    tool_search_candidates: list[dict[str, Any]]
+    selected_tool_schemas: list[dict[str, Any]]
+    tool_catalog_version: int
+    route_decisions: list[dict[str, Any]]
+    authorization_epoch: str
+    llm_stage_metrics: list[dict[str, Any]]
+    agent_step_count: int
     tool_calls_proposed: list[dict[str, Any]]
     tool_results: list[dict[str, Any]]
     hitl_required: bool
@@ -79,25 +102,63 @@ class CopilotState(TypedDict, total=False):
 
 SYSTEM_PROMPT = build_system_prompt(DEEPSEEK_MODEL, startup_skill_summaries())
 
-ROUTER_PROMPT = f"""你是 DCS/FusionCompute/eDME 运维 Copilot 的路由器。
-根据完整对话判断用户意图,自行决定调用哪些只读工具获取真实数据,或不调用工具直接回答概念/寒暄/身份类问题。
+# Shared prefix for every stage prompt below — single source of truth for
+# identity (see architecture-issues-analysis.md P1) and a stable prefix DeepSeek's
+# KV cache can line up across stages.
+IDENTITY_BLOCK = identity_block(DEEPSEEK_MODEL)
+
+SKILL_ROUTER_PROMPT = f"""{IDENTITY_BLOCK}
+
+当前阶段:Skill 选择。根据完整对话和下面按角色过滤后的 Skill 目录(仅一句话摘要),判断:
+- 是否需要使用某个 Skill 的完整流程来处理这个请求;
+- 还是可以直接回答(寒暄/身份/概念说明,不需要实时数据);
+- 还是信息不足,需要用户澄清(缺少必要的资源标识等)。
+
+必须严格输出 JSON,字段:
+- "decision": "use_skill" | "direct_answer" | "clarification_required"
+- "skill_ids": 数组,decision=use_skill 时填入目录中实际存在的 Skill id(一般 1 个即可)
+- "arguments": 对象,附加给后续阶段的线索(如已知的资源 ID),没有就给空对象
+- "confidence": 0~1 之间的小数
+- "missing_context": 数组,decision=clarification_required 时列出还缺什么
+- "reason_summary": 一句话说明为什么这样判断
+
 规则:
-- 优先使用最少、最相关的工具。一般的告警/资源/容量/性能问题使用 FusionCompute/Dorado 工具(如 list_alarms、get_resource_overview);只有用户明确提到 eDME、OceanStor 或存储设备纳管时才使用 query_edme_* 工具。
+- 只能从给出的 Skill 目录中选择 id,不要编造不存在的 id。
+- 写操作(重启/扩容/迁移/修改/删除)如果对应某个 Skill 的标准流程,同样走 use_skill,是否执行由后续护栏和审批独立裁决。
+- 追问("它呢""第二条""上面说的X")请结合历史自行消解指代。"""
+
+TOOL_SEARCH_PROMPT = f"""{IDENTITY_BLOCK}
+
+当前阶段:工具检索。你已经拿到下面这个 Skill 的完整内容。判断本轮是否需要调用真实工具获取数据:
+- 需要就调用 ToolSearch,给出简短的检索 query(用于在工具目录里做关键词检索)、期望返回的候选数量 top_k,以及可选的 required_capabilities 标签。
+- 不需要实时数据(纯概念/流程说明)就不要调用 ToolSearch。
+
+工具目录按以下几类组织,你看不到具体工具名和参数 schema,只需要用自然语言描述需要什么数据:
+- alert:告警查询
+- resource:资源/清单查询
+- capacity:容量与预测
+- performance:性能指标
+- admin:变更类写操作(重启/扩容/HA策略/审批)"""
+
+TOOL_CALL_PROMPT = f"""{IDENTITY_BLOCK}
+
+当前阶段:工具调用。你已经拿到 Skill 完整内容和下面这些候选工具的完整参数 schema(工具检索阶段已经按需要过滤过)。
+规则:
+- 优先使用最少、最相关的工具,只从下面提供的候选里选,不要假设存在没给你的工具。
 - 调用工具时严格按参数 schema 传参,不要添加 schema 未定义的字段,不确定的可选参数就不要传。
 - 只有用户明确指向的对象(VM/集群/告警/存储 ID 或名称)才调用相关工具;缺少标识时不要猜测资源,也不要调用工具。
-- 术语解释、概念说明、寒暄、自我介绍等不需要实时数据的问题,不要调用工具。
 - 写操作(重启/扩容/迁移/修改/删除)只提出对应工具调用,是否执行由护栏和审批独立裁决,你无法绕过。
-- 追问("它呢""第二条""上面说的X")请结合历史自行消解指代。
+- 追问("它呢""第二条""上面说的X")请结合历史自行消解指代。"""
 
-可用 Skill 第一层:
-{startup_skill_summaries()}"""
+RESPONDER_PROMPT = f"""{IDENTITY_BLOCK}
 
-RESPONDER_PROMPT = """你是 DCS/FusionCompute/eDME 运维 Copilot,负责生成最终回答。
-必须严格输出 JSON,字段:
+当前阶段:回答生成。输入里除 tool_results 外还可能包含 skill_decision、tool_search_request、
+tool_search_candidates、route_decisions、retrieved_cases 等前序阶段的决策摘要,仅作为背景参考,
+不改变输出契约。必须严格输出 JSON,字段:
 - "answer": 给用户的自然语言回答。结论优先,附证据、建议动作、风险/下一步。
 - "resource_claims": 数组。回答里出现的每一个资源 ID(如 vm-1001、host-005、alarm-9001、edme-storage-002)都必须在此申报一条:
-    - {"id": "<资源ID>", "kind": "example"}  用于举例说明或引用历史上下文,不断言其当前状态。
-    - {"id": "<资源ID>", "kind": "state_assertion", "from_tool": "<工具名>"}  断言该资源的当前状态/数值,必须来自本轮某个工具结果。
+    - {{"id": "<资源ID>", "kind": "example"}}  用于举例说明或引用历史上下文,不断言其当前状态。
+    - {{"id": "<资源ID>", "kind": "state_assertion", "from_tool": "<工具名>"}}  断言该资源的当前状态/数值,必须来自本轮某个工具结果。
 
 硬性要求:
 - 只能基于 tool_results 里的真实数据断言资源状态;严禁编造 tool_results 之外的资源、数值或状态。
@@ -105,13 +166,22 @@ RESPONDER_PROMPT = """你是 DCS/FusionCompute/eDME 运维 Copilot,负责生成�
 - 写操作在审批前一律说明"已进入审批,未执行",不得声称已完成。
 - answer 中提到的每个资源 ID 都必须在 resource_claims 里出现,不得遗漏。"""
 
+TOOL_SEARCH_META_TOOL = [{
+    "type": "function",
+    "function": {
+        "name": "ToolSearch",
+        "description": "在工具目录中检索候选工具，返回匹配到的完整参数 schema 供下一步使用。",
+        "parameters": ToolSearchRequest.model_json_schema(),
+    },
+}]
+
 LLM_UNAVAILABLE_MESSAGE = (
     "当前未配置或无法连接大模型(DeepSeek)。本系统的意图理解与回答生成依赖大模型,"
     "请在 .env 中配置 DEEPSEEK_API_KEY 或恢复网络后重试。"
 )
 
 
-def _rbac_tool_catalog(roles: list[str]) -> list[dict[str, Any]]:
+def _rbac_tool_catalog(roles: list[str], names: set[str] | None = None) -> list[dict[str, Any]]:
     return [
         {
             "type": "function",
@@ -122,17 +192,20 @@ def _rbac_tool_catalog(roles: list[str]) -> list[dict[str, Any]]:
             },
         }
         for spec in TOOL_REGISTRY.values()
-        if any(role in spec.auth_roles for role in roles)
+        if any(role in spec.auth_roles for role in roles) and (names is None or spec.name in names)
     ]
 
 
-def _llm_history(state: CopilotState) -> list[dict[str, str]]:
-    """Compose the chat history handed to the LLM: rolling summary + relevant +
+def _llm_history(state: CopilotState, extra_context: str = "") -> list[dict[str, str]]:
+    """Compose the chat history handed to the LLM: rolling summary + (optional
+    stage-specific extra context, e.g. loaded Skill content) + relevant +
     recent turns + the current user message."""
     history: list[dict[str, str]] = []
     summary = state.get("conversation_summary", "").strip()
     if summary:
         history.append({"role": "system", "content": f"对话摘要:\n{summary}"})
+    if extra_context:
+        history.append({"role": "system", "content": f"已选 Skill 完整内容:\n{extra_context}"})
     seen: set[tuple[str, str]] = set()
     for item in [*state.get("relevant_messages", []), *state.get("recent_messages", [])]:
         key = (item.get("role", ""), item.get("content", ""))
@@ -142,6 +215,89 @@ def _llm_history(state: CopilotState) -> list[dict[str, str]]:
         history.append({"role": item.get("role", "user"), "content": item.get("content", "")})
     history.append({"role": "user", "content": state["message"]})
     return history
+
+
+def _loaded_skills_text(state: CopilotState) -> str:
+    skills = state.get("loaded_skills") or []
+    if not skills:
+        return ""
+    return "\n\n".join(
+        f"## {skill['id']} (v{skill['version']})\n摘要: {skill['summary']}\n详细步骤: {skill['detail']}"
+        for skill in skills
+    )
+
+
+def _skill_router_payload(state: CopilotState) -> str:
+    payload = {
+        "message": state["message"],
+        "conversation_summary": state.get("conversation_summary", "")[:1500],
+        "recent_messages": state.get("recent_messages", [])[-6:],
+        "skill_catalog": skill_catalog_tier1(state["user_roles"]),
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _call_skill_router(payload: str) -> dict[str, Any] | None:
+    try:
+        return call_deepseek_json(SKILL_ROUTER_PROMPT, payload, max_tokens=600)
+    except Exception:
+        return None
+
+
+def _call_tool_search_planner(
+    history: list[dict[str, str]], tools: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    try:
+        return call_deepseek_agent_plan(TOOL_SEARCH_PROMPT, history, tools)
+    except Exception:
+        return None
+
+
+def _call_tool_call_planner(
+    history: list[dict[str, str]], tools: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    try:
+        return call_deepseek_agent_plan(TOOL_CALL_PROMPT, history, tools)
+    except Exception:
+        return None
+
+
+def authorization_epoch(roles: list[str], tenant_id: str) -> str:
+    """Fingerprint of "what this turn is allowed to see", fixed at turn start.
+
+    Used to detect a stale in-flight write across a HITL pause: if the skill
+    or tool catalog version changes while a human is approving, the fingerprint
+    no longer matches and the write is rejected instead of executed against a
+    catalog it was never actually validated against."""
+    return f"{tenant_id}:{'|'.join(sorted(roles))}:{skill_catalog_version()}:{TOOL_CATALOG_VERSION}"
+
+
+def _budget_exhausted(state: CopilotState) -> bool:
+    return state.get("agent_step_count", 0) >= MAX_LLM_CALLS_PER_TURN
+
+
+def _stage_metric(stage: str, started: float, success: bool, summary: str = "") -> dict[str, Any]:
+    usage = get_last_llm_usage() if success else None
+    return {
+        "stage": stage,
+        "latency_ms": int((perf_counter() - started) * 1000),
+        "success": success,
+        "model": DEEPSEEK_MODEL,
+        "prompt_tokens": (usage or {}).get("prompt_tokens"),
+        "completion_tokens": (usage or {}).get("completion_tokens"),
+        "summary": summary,
+    }
+
+
+def _record_step(state: CopilotState, entry: dict[str, Any]) -> dict[str, Any]:
+    """Step-count + metrics update shared by every LLM call site (the 3
+    planning stages plus each responder retry). MAX_LLM_CALLS_PER_TURN caps
+    the total across a turn so a bug can't loop indefinitely; in practice the
+    normal path (1+1+1+<=3 responder retries) never approaches it."""
+    return {
+        "agent_step_count": state.get("agent_step_count", 0) + 1,
+        "llm_stage_metrics": [*state.get("llm_stage_metrics", []), entry],
+    }
 
 
 # --- Context / retrieval (feed the model) ------------------------------------
@@ -175,24 +331,211 @@ def context_loader(state: CopilotState) -> CopilotState:
     }
 
 
-def memory_retriever(state: CopilotState) -> CopilotState:
-    docs = retrieve(state["message"], state["user_roles"], top_k=3, tenant_id=state["tenant_id"], tier=2)
-    history = retrieve_history(state["message"], state["user_roles"], top_k=2, tenant_id=state["tenant_id"])
-    return {"retrieved_docs": docs, "retrieved_history": history}
+def history_retriever(state: CopilotState) -> CopilotState:
+    """Historical alert-case BM25 only. Skill discovery no longer goes through
+    BM25-on-the-raw-message — that channel is superseded by skill_router's
+    exact, model-driven selection plus skill_loader's exact-ID load."""
+    cases = retrieve_history(state["message"], state["user_roles"], top_k=2, tenant_id=state["tenant_id"])
+    return {"retrieved_cases": cases}
 
 
-# --- Cognitive layer: routing is the model's job -----------------------------
+# --- Skill/tool progressive-loading host steps -------------------------------
 
-def llm_router(state: CopilotState) -> CopilotState:
-    tools = _rbac_tool_catalog(state["user_roles"])
+MAX_SKILLS_PER_TURN = 3
+
+
+def skill_loader(state: CopilotState) -> CopilotState:
+    """Resolve skill_decision's skill_ids to full Tier-2/3 content by exact ID
+    (not BM25). Defense-in-depth role re-check mirrors how guardrail re-checks
+    RBAC even though an upstream stage already filtered. Unresolvable IDs are
+    dropped rather than failing the turn — a downstream stage decides what to
+    do with an empty result, this step doesn't short-circuit on its own."""
+    skill_ids = (state.get("skill_decision") or {}).get("skill_ids") or []
+    loaded: list[dict[str, Any]] = []
+    resolved_ids: list[str] = []
+    for skill_id in skill_ids[:MAX_SKILLS_PER_TURN]:
+        skill = load_skill_by_id(skill_id)
+        if not skill or not any(role in skill.applicable_roles for role in state["user_roles"]):
+            continue
+        loaded.append({
+            "id": skill.id,
+            "title": skill.title,
+            "version": skill.version,
+            "tags": skill.tags,
+            "summary": skill.summary,
+            "detail": skill.detail,
+        })
+        resolved_ids.append(skill.id)
+    return {
+        "loaded_skills": loaded,
+        "selected_skill_ids": resolved_ids,
+        "skill_catalog_version": skill_catalog_version(),
+    }
+
+
+def tool_catalog_search(state: CopilotState) -> CopilotState:
+    """RBAC-filter then BM25-rank TOOL_REGISTRY against LLM2's ToolSearch query,
+    then build full function-calling schemas for just the candidate tools.
+    Unauthorized tools are excluded before ranking, not just before execution —
+    they must never become a search candidate, let alone reach LLM3."""
+    request = state.get("tool_search_request") or {}
+    query = str(request.get("query") or "")
+    top_k = int(request.get("top_k") or 5)
+    candidates = (
+        retrieve_tools(query, state["user_roles"], state["tenant_id"], top_k=top_k)
+        if query.strip()
+        else []
+    )
+    names = {candidate["tool_name"] for candidate in candidates}
+    schemas = _rbac_tool_catalog(state["user_roles"], names=names)
+    result: dict[str, Any] = {
+        "tool_search_candidates": candidates,
+        "selected_tool_schemas": schemas,
+        "tool_catalog_version": TOOL_CATALOG_VERSION,
+    }
+    if not candidates:
+        result["plan_source"] = "tool_search_no_candidates"
+    return result
+
+
+# --- Cognitive layer: three planning stages, each a single, narrow LLM call --
+
+def skill_router(state: CopilotState) -> CopilotState:
+    """LLM1: decide whether this turn needs a Skill's full procedure, a direct
+    answer, or clarification — seeing only role-filtered Skill one-liners, not
+    their full content and not the tool catalog at all."""
+    if _budget_exhausted(state):
+        return {
+            "skill_decision": {},
+            "plan_source": "skill_router_fallback",
+            "intent": "direct_answer",
+            "fallback_reason": "llm_call_budget_exhausted",
+        }
+    started = perf_counter()
+    decision = _call_skill_router(_skill_router_payload(state))
+    step = _record_step(state, _stage_metric("skill_router", started, decision is not None))
+    if decision is None:
+        return {
+            **step,
+            "skill_decision": {},
+            "plan": [],
+            "plan_source": "llm_unavailable",
+            "llm_available": False,
+            "intent": "unavailable",
+        }
+    choice = decision.get("decision")
+    skill_ids = [str(item) for item in (decision.get("skill_ids") or []) if item]
+    reason = str(decision.get("reason_summary") or "")
+    base = {
+        **step,
+        "skill_decision": decision,
+        "plan": [reason] if reason else [],
+        "llm_available": True,
+    }
+    if choice == "use_skill" and skill_ids:
+        return {**base, "selected_skill_ids": skill_ids, "plan_source": "skill_router", "intent": "tool_execution"}
+    if choice == "clarification_required":
+        return {**base, "plan_source": "skill_router_clarification", "intent": "clarification_required"}
+    if choice == "direct_answer":
+        return {**base, "plan_source": "skill_router_direct_answer", "intent": "direct_answer"}
+    # Malformed/unrecognized decision, or use_skill with no ids: fail closed to
+    # a direct answer rather than retrying — only the Responder retries here.
+    return {
+        **base,
+        "plan_source": "skill_router_fallback",
+        "intent": "direct_answer",
+        "fallback_reason": "skill_router_invalid_output",
+    }
+
+
+def route_after_skill_router(state: CopilotState) -> Literal["skill_loader", "llm_responder"]:
+    if state.get("llm_available") is False:
+        return "llm_responder"
+    decision = state.get("skill_decision") or {}
+    if decision.get("decision") == "use_skill" and decision.get("skill_ids"):
+        return "skill_loader"
+    return "llm_responder"
+
+
+def tool_search_planner(state: CopilotState) -> CopilotState:
+    """LLM2: given the fully-loaded Skill, decide whether real tool data is
+    needed and, if so, "call" the synthetic ToolSearch tool with a query."""
+    if _budget_exhausted(state):
+        return {
+            "tool_search_request": {},
+            "plan_source": "tool_search_declined",
+            "fallback_reason": "llm_call_budget_exhausted",
+        }
+    started = perf_counter()
+    result = _call_tool_search_planner(
+        _llm_history(state, extra_context=_loaded_skills_text(state)),
+        TOOL_SEARCH_META_TOOL,
+    )
+    step = _record_step(state, _stage_metric("tool_search_planner", started, result is not None))
+    plan = state.get("plan", [])
+    if result is None:
+        return {**step, "tool_search_request": {}, "llm_available": False, "plan_source": "llm_unavailable"}
+    search_call = next(
+        (call for call in (result.get("tool_calls") or []) if call.get("tool_name") == "ToolSearch"),
+        None,
+    )
+    if not search_call:
+        reason = result.get("reason") or ""
+        return {
+            **step,
+            "tool_search_request": {},
+            "plan": [*plan, reason] if reason else plan,
+            "plan_source": "tool_search_declined",
+        }
     try:
-        plan = call_deepseek_agent_plan(ROUTER_PROMPT, _llm_history(state), tools)
-    except Exception:
-        plan = None
-    if plan is None:
+        validated = ToolSearchRequest.model_validate(search_call.get("params") or {})
+    except ValidationError:
+        return {
+            **step,
+            "tool_search_request": {},
+            "plan_source": "tool_search_invalid_output",
+            "fallback_reason": "tool_search_invalid_output",
+        }
+    return {
+        **step,
+        "tool_search_request": validated.model_dump(),
+        "plan": [*plan, f"检索工具: {validated.query}"],
+        "plan_source": "tool_search_planner",
+    }
+
+
+def route_after_tool_search(state: CopilotState) -> Literal["tool_catalog_search", "llm_responder"]:
+    if state.get("llm_available") is False:
+        return "llm_responder"
+    return "tool_catalog_search" if (state.get("tool_search_request") or {}).get("query") else "llm_responder"
+
+
+def route_after_tool_catalog_search(state: CopilotState) -> Literal["tool_call_planner", "llm_responder"]:
+    return "tool_call_planner" if state.get("tool_search_candidates") else "llm_responder"
+
+
+def tool_call_planner(state: CopilotState) -> CopilotState:
+    """LLM3: given the Skill and only the candidate tool schemas tool_catalog_search
+    found, decide the real tool_calls. Functionally the old llm_router's tool
+    selection, narrowed to a pre-filtered candidate set instead of the full
+    RBAC catalog."""
+    if _budget_exhausted(state):
         return {
             "tool_calls_proposed": [],
-            "plan": [],
+            "plan_source": "llm_unavailable",
+            "llm_available": False,
+            "step_budget_hit": False,
+            "intent": "unavailable",
+            "fallback_reason": "llm_call_budget_exhausted",
+        }
+    tools = state.get("selected_tool_schemas") or []
+    started = perf_counter()
+    plan = _call_tool_call_planner(_llm_history(state, extra_context=_loaded_skills_text(state)), tools)
+    step = _record_step(state, _stage_metric("tool_call_planner", started, plan is not None))
+    if plan is None:
+        return {
+            **step,
+            "tool_calls_proposed": [],
             "plan_source": "llm_unavailable",
             "llm_available": False,
             "step_budget_hit": False,
@@ -202,9 +545,11 @@ def llm_router(state: CopilotState) -> CopilotState:
     step_budget_hit = len(calls) > MAX_TOOL_CALLS_PER_TURN
     calls = calls[:MAX_TOOL_CALLS_PER_TURN]
     reason = plan.get("reason") or ""
+    existing_plan = state.get("plan", [])
     return {
+        **step,
         "tool_calls_proposed": calls,
-        "plan": [reason] if reason else [],
+        "plan": [*existing_plan, reason] if reason else existing_plan,
         "plan_source": "deepseek_agent",
         "llm_available": True,
         "step_budget_hit": step_budget_hit,
@@ -215,11 +560,15 @@ def llm_router(state: CopilotState) -> CopilotState:
 # --- Safety spine (unchanged): RBAC / risk / rate limit / HITL / execute -----
 
 def guardrail(state: CopilotState) -> CopilotState:
+    allowed_tool_names = {
+        schema["function"]["name"] for schema in state.get("selected_tool_schemas", [])
+    }
     result = validate_tool_calls(
         state.get("tool_calls_proposed", []),
         state["user_roles"],
         state["message"],
         state["task_id"],
+        allowed_tool_names=allowed_tool_names,
     )
     if not result["allowed"]:
         return {
@@ -279,6 +628,18 @@ def tool_executor(state: CopilotState) -> CopilotState:
     calls = state.get("tool_calls_proposed", [])
     write_calls = [call for call in calls if risk_for_tool(call["tool_name"]) in {"medium", "high"}]
     if write_calls:
+        # Catches a Skill/tool catalog redeploy that happened while a human was
+        # approving during hitl_interrupt's pause: the fingerprint fixed at
+        # turn start (run_copilot's initial state) is compared against what it
+        # would be right now, so a stale write executes against a catalog it
+        # was never actually validated against.
+        current_epoch = authorization_epoch(state["user_roles"], state["tenant_id"])
+        if current_epoch != state.get("authorization_epoch"):
+            return {
+                "tool_results": [],
+                "execution_log": [],
+                "error": "执行前复检失败：技能或工具目录版本已变化，请重新发起请求",
+            }
         recheck = validate_tool_calls(write_calls, state["user_roles"], state["message"], state["task_id"])
         if not recheck["allowed"]:
             return {
@@ -366,15 +727,32 @@ def _responder_payload(state: CopilotState, feedback: str = "") -> str:
         }
         for item in state.get("tool_results", [])
     ]
+    skill_decision = state.get("skill_decision") or {}
     payload = {
         "message": state["message"],
         "conversation_summary": state.get("conversation_summary", "")[:1500],
         "working_context": state.get("working_context", {}),
         "recent_messages": state.get("recent_messages", [])[-6:],
         "retrieved_docs": [
-            {"title": doc.get("title"), "content": (doc.get("content") or "")[:500]}
-            for doc in state.get("retrieved_docs", [])[:3]
+            {"title": skill.get("title"), "content": (skill.get("summary") or "")[:500]}
+            for skill in state.get("loaded_skills", [])[:3]
         ],
+        "retrieved_cases": [
+            {"title": case.get("title"), "content": (case.get("content") or "")[:500]}
+            for case in state.get("retrieved_cases", [])[:2]
+        ],
+        "skill_decision": {
+            "decision": skill_decision.get("decision"),
+            "skill_ids": skill_decision.get("skill_ids"),
+            "confidence": skill_decision.get("confidence"),
+            "reason_summary": skill_decision.get("reason_summary"),
+        } if skill_decision else {},
+        "tool_search_request": state.get("tool_search_request") or {},
+        "tool_search_candidates": [
+            {"tool_name": item.get("tool_name"), "score": item.get("score")}
+            for item in state.get("tool_search_candidates", [])
+        ],
+        "route_decisions": state.get("route_decisions", []),
         "plan": state.get("plan", []),
         "tool_results": tool_results,
         "error": state.get("error"),
@@ -396,11 +774,15 @@ def llm_responder(state: CopilotState) -> CopilotState:
         # Set upstream (e.g. HITL rejection message).
         return {"response_source": "policy", "llm_status": get_public_llm_status()}
     if state.get("llm_available") is False:
+        # A planning stage can set llm_available=False for reasons other than
+        # "no API key" (e.g. llm_call_budget_exhausted) — preserve whatever
+        # reason it already recorded instead of overwriting it, so the two
+        # cases stay distinguishable in fallback_reason/observability.
         return {
             "final_response": LLM_UNAVAILABLE_MESSAGE,
             "response_source": "unavailable",
             "llm_status": get_public_llm_status(),
-            "fallback_reason": "llm_not_configured",
+            "fallback_reason": state.get("fallback_reason") or "llm_not_configured",
         }
     if state.get("error"):
         return {
@@ -412,13 +794,21 @@ def llm_responder(state: CopilotState) -> CopilotState:
 
     feedback = ""
     last_reason = "grounding_rejected"
+    step_count = state.get("agent_step_count", 0)
+    stage_metrics = list(state.get("llm_stage_metrics", []))
     for attempt in range(3):
+        if step_count >= MAX_LLM_CALLS_PER_TURN:
+            last_reason = "llm_call_budget_exhausted"
+            break
+        started = perf_counter()
         try:
             # Generous token budget: the model must emit the answer plus a claim
             # per resource as JSON; too small a cap truncates the JSON (finish
             # reason "length") and it fails to parse.
             parsed = call_deepseek_json(RESPONDER_PROMPT, _responder_payload(state, feedback), max_tokens=4096)
         except Exception as exc:
+            step_count += 1
+            stage_metrics.append(_stage_metric("llm_responder", started, False, summary=type(exc).__name__))
             # Transient/endpoint error: retry within budget before degrading.
             last_reason = f"llm_error:{type(exc).__name__}"
             if attempt < 2:
@@ -428,7 +818,11 @@ def llm_responder(state: CopilotState) -> CopilotState:
                 "response_source": "unavailable",
                 "llm_status": get_public_llm_status(),
                 "fallback_reason": last_reason,
+                "agent_step_count": step_count,
+                "llm_stage_metrics": stage_metrics,
             }
+        step_count += 1
+        stage_metrics.append(_stage_metric("llm_responder", started, parsed is not None))
         if not parsed or not isinstance(parsed.get("answer"), str) or not parsed["answer"].strip():
             feedback = "上一轮输出不是符合 schema 的 JSON,请严格输出 answer 与 resource_claims 字段。"
             last_reason = "schema_invalid"
@@ -445,6 +839,8 @@ def llm_responder(state: CopilotState) -> CopilotState:
                 "response_source": "deepseek",
                 "llm_status": get_public_llm_status(),
                 "fallback_reason": None,
+                "agent_step_count": step_count,
+                "llm_stage_metrics": stage_metrics,
             }
         feedback = reason
         last_reason = "grounding_rejected"
@@ -457,6 +853,8 @@ def llm_responder(state: CopilotState) -> CopilotState:
         "response_source": "grounding_guard",
         "llm_status": get_public_llm_status(),
         "fallback_reason": last_reason,
+        "agent_step_count": step_count,
+        "llm_stage_metrics": stage_metrics,
     }
 
 
@@ -502,8 +900,12 @@ def build_graph():
     builder = StateGraph(CopilotState)
     for name, fn in [
         ("context_loader", context_loader),
-        ("memory_retriever", memory_retriever),
-        ("llm_router", llm_router),
+        ("history_retriever", history_retriever),
+        ("skill_router", skill_router),
+        ("skill_loader", skill_loader),
+        ("tool_search_planner", tool_search_planner),
+        ("tool_catalog_search", tool_catalog_search),
+        ("tool_call_planner", tool_call_planner),
         ("guardrail", guardrail),
         ("hitl_interrupt", hitl_interrupt),
         ("tool_executor", tool_executor),
@@ -513,9 +915,13 @@ def build_graph():
     ]:
         builder.add_node(name, fn)
     builder.set_entry_point("context_loader")
-    builder.add_edge("context_loader", "memory_retriever")
-    builder.add_edge("memory_retriever", "llm_router")
-    builder.add_edge("llm_router", "guardrail")
+    builder.add_edge("context_loader", "history_retriever")
+    builder.add_edge("history_retriever", "skill_router")
+    builder.add_conditional_edges("skill_router", route_after_skill_router)
+    builder.add_edge("skill_loader", "tool_search_planner")
+    builder.add_conditional_edges("tool_search_planner", route_after_tool_search)
+    builder.add_conditional_edges("tool_catalog_search", route_after_tool_catalog_search)
+    builder.add_edge("tool_call_planner", "guardrail")
     builder.add_conditional_edges("guardrail", route_after_guardrail)
     builder.add_conditional_edges("hitl_interrupt", route_after_hitl)
     builder.add_edge("tool_executor", "llm_responder")
@@ -560,6 +966,20 @@ def _format_result(state: dict[str, Any], conversation_id: str) -> dict[str, Any
     answer = state.get("final_response")
     if approval_payload:
         answer = f"该操作需要人工审批，已暂停执行并进入审批队列：{approval_payload['approval_id']}。"
+    # retrieved_docs/retrieved_history are synthesized for API/frontend
+    # compatibility: the graph no longer writes them directly (Skill discovery
+    # moved to skill_router/skill_loader; retrieved_cases replaces the old,
+    # previously-dead retrieved_history channel).
+    retrieved_docs = [
+        {
+            "id": skill.get("id"),
+            "title": skill.get("title"),
+            "content": skill.get("summary"),
+            "score": 1.0,
+            "retrieval_mode": "skill_router",
+        }
+        for skill in state.get("loaded_skills", [])
+    ]
     return {
         "conversation_id": conversation_id,
         "intent": state.get("intent"),
@@ -570,8 +990,12 @@ def _format_result(state: dict[str, Any], conversation_id: str) -> dict[str, Any
         "blocked_reason": state.get("error"),
         "plan": state.get("plan", []),
         "plan_source": state.get("plan_source", "unknown"),
-        "retrieved_docs": state.get("retrieved_docs", []),
-        "retrieved_history": state.get("retrieved_history", []),
+        "retrieved_docs": retrieved_docs,
+        "retrieved_history": state.get("retrieved_cases", []),
+        "route_decisions": state.get("route_decisions", []),
+        "skill_decision": state.get("skill_decision", {}),
+        "llm_stage_metrics": state.get("llm_stage_metrics", []),
+        "agent_step_count": state.get("agent_step_count", 0),
         "summary": state.get("conversation_summary", ""),
         "memory_summary": state.get("summary", ""),
         "response_source": state.get("response_source", "unavailable"),
@@ -620,10 +1044,21 @@ def run_copilot(
             "context_metrics": {},
             "alert_payload": None,
             "resource_snapshot": None,
-            "retrieved_docs": [],
-            "retrieved_history": [],
+            "retrieved_cases": [],
             "plan": [],
             "plan_source": "pending",
+            "skill_decision": {},
+            "selected_skill_ids": [],
+            "loaded_skills": [],
+            "skill_catalog_version": 0,
+            "tool_search_request": {},
+            "tool_search_candidates": [],
+            "selected_tool_schemas": [],
+            "tool_catalog_version": TOOL_CATALOG_VERSION,
+            "route_decisions": [],
+            "authorization_epoch": authorization_epoch(roles or ["readonly"], tenant_id),
+            "llm_stage_metrics": [],
+            "agent_step_count": 0,
             "tool_calls_proposed": [],
             "tool_results": [],
             "execution_log": [],

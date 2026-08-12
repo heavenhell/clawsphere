@@ -16,10 +16,13 @@ import backend.agent.llm as llm
 from backend.guardrails.chat_limits import ChatLimiter
 from backend.app import app
 from backend.guardrails.approvals import approval_store
-from backend.mcp.mcp_server import _call
-from backend.mcp.schemas import ToolRequest
-from backend.mcp.tools import call_tool
+from pydantic import ValidationError
+
+from backend.mcp.mcp_server import _call, mcp
+from backend.mcp.schemas import ToolRequest, ToolSearchRequest
+from backend.mcp.tools import TOOL_REGISTRY, call_tool
 from backend.memory.database import memory_db
+from tests.test_hitl import _propose
 
 
 client = TestClient(app)
@@ -122,6 +125,7 @@ def test_llm_outbound_payload_redacts_secret_like_values(monkeypatch):
             return FakeResponse()
 
     monkeypatch.setattr(llm.httpx, "Client", CaptureClient)
+    escaped_tail_fragment = json.dumps({"password": f'alpha " {escaped_tail}'})
     llm._invoke({
         "model": "deepseek-v4-pro",
         "messages": [{
@@ -143,7 +147,7 @@ def test_llm_outbound_payload_redacts_secret_like_values(monkeypatch):
                 f"https://example.invalid/?secretAccessKey={sentinel}; "
                 f"postgresql://demo:{sentinel}@localhost/database; "
                 f"https://demo:{sentinel}@example.invalid/; "
-                f'{json.dumps({"password": f"alpha \u0022 {escaped_tail}"})}; '
+                f"{escaped_tail_fragment}; "
                 f"-----BEGIN PRIVATE KEY-----\n{sentinel}\n-----END PRIVATE KEY-----"
             ),
         }],
@@ -451,6 +455,20 @@ def test_mcp_write_uses_caller_supplied_approved_task_id(monkeypatch):
     assert executed["success"]
 
 
+def test_tool_search_query_rejects_control_characters():
+    ToolSearchRequest.model_validate({"query": "list_alarms 当前告警", "top_k": 3})
+    with pytest.raises(ValidationError):
+        ToolSearchRequest.model_validate({"query": "list_alarms\x00\x1b[31m", "top_k": 3})
+    with pytest.raises(ValidationError):
+        ToolSearchRequest.model_validate({"query": "line one\nline two", "top_k": 3})
+
+
+def test_mcp_server_exposes_every_registered_tool():
+    """Regression guard against tools.py/mcp_server.py registration drift:
+    every TOOL_REGISTRY entry must have a hand-written @mcp.tool() wrapper."""
+    assert set(mcp._tool_manager._tools.keys()) == set(TOOL_REGISTRY.keys())
+
+
 def test_audit_api_is_tenant_scoped():
     call_tool(ToolRequest(
         tool_name="list_vms", params={}, caller_user_id="auditor-a",
@@ -486,10 +504,7 @@ def test_chat_rejects_client_supplied_history():
 
 
 def test_llm_proposed_tools_are_audited_under_the_real_identity(monkeypatch):
-    monkeypatch.setattr(copilot, "call_deepseek_agent_plan", lambda *args, **kwargs: {
-        "tool_calls": [{"tool_name": "list_alarms", "params": {}}],
-        "reason": "model proposal",
-    })
+    _propose(monkeypatch, "list_alarms", {})
     tenant_id = f"planner-tenant-{uuid4()}"
     user_id = "planner-user"
     copilot.run_copilot(
@@ -502,6 +517,46 @@ def test_llm_proposed_tools_are_audited_under_the_real_identity(monkeypatch):
     records = memory_db.list_tool_audit(20, tenant_id)
     assert records
     assert all(record["user_id"] == user_id for record in records)
+
+
+def test_unauthorized_tool_never_becomes_a_search_candidate(monkeypatch):
+    """tool_catalog_search RBAC-filters TOOL_REGISTRY before BM25-ranking, so a
+    role that can never call scale_cluster never gets it as a candidate — even
+    when the search query names it directly, tool_call_planner (LLM3) never
+    even sees its schema, let alone gets a chance to propose it."""
+    monkeypatch.setattr(
+        copilot,
+        "_call_skill_router",
+        lambda *args, **kwargs: {
+            "decision": "use_skill",
+            "skill_ids": ["resource_query"],
+            "arguments": {},
+            "confidence": 0.9,
+            "missing_context": [],
+            "reason_summary": "test stub",
+        },
+    )
+    monkeypatch.setattr(
+        copilot,
+        "_call_tool_search_planner",
+        lambda *args, **kwargs: {
+            "tool_calls": [{
+                "tool_name": "ToolSearch",
+                "params": {"query": "scale_cluster 调整集群主机数", "top_k": 5, "required_capabilities": []},
+            }],
+            "reason": "test stub",
+        },
+    )
+    offered_tool_names = []
+
+    def spy(history, tools):
+        offered_tool_names.extend(tool["function"]["name"] for tool in tools)
+        return {"tool_calls": [], "reason": "spy"}
+
+    monkeypatch.setattr(copilot, "_call_tool_call_planner", spy)
+    result = copilot.run_copilot("帮我扩容集群", ["readonly"])
+    assert "scale_cluster" not in offered_tool_names
+    assert not result["tool_calls"]
 
 
 def test_approved_tool_must_match_approved_parameters():
@@ -534,13 +589,12 @@ def test_approved_tool_must_match_approved_parameters():
 
 
 def test_llm_tool_plan_still_passes_rbac(monkeypatch):
-    monkeypatch.setattr(copilot, "call_deepseek_agent_plan", lambda *args, **kwargs: {
-        "tool_calls": [{
-            "tool_name": "restart_vm",
-            "params": {"vm_id": "vm-1001", "reason": "model planned write", "change_ticket_id": "DEMO-LLM"},
-        }],
-        "reason": "model proposal",
-    })
+    _propose(
+        monkeypatch,
+        "restart_vm",
+        {"vm_id": "vm-1001", "reason": "model planned write", "change_ticket_id": "DEMO-LLM"},
+        bypass_rbac_search=True,
+    )
     result = copilot.run_copilot("查询 dcs-app-01 的性能", ["readonly"])
     assert result["plan_source"] == "deepseek_agent"
     assert "无权调用工具" in result["answer"]
@@ -548,7 +602,30 @@ def test_llm_tool_plan_still_passes_rbac(monkeypatch):
 
 
 def test_step_budget_caps_tool_calls_per_turn(monkeypatch):
-    monkeypatch.setattr(copilot, "call_deepseek_agent_plan", lambda *args, **kwargs: {
+    monkeypatch.setattr(
+        copilot,
+        "_call_skill_router",
+        lambda *args, **kwargs: {
+            "decision": "use_skill",
+            "skill_ids": ["alert_query"],
+            "arguments": {},
+            "confidence": 0.9,
+            "missing_context": [],
+            "reason_summary": "test stub",
+        },
+    )
+    monkeypatch.setattr(
+        copilot,
+        "_call_tool_search_planner",
+        lambda *args, **kwargs: {
+            "tool_calls": [{
+                "tool_name": "ToolSearch",
+                "params": {"query": "list_alarms", "top_k": 5, "required_capabilities": []},
+            }],
+            "reason": "test stub",
+        },
+    )
+    monkeypatch.setattr(copilot, "_call_tool_call_planner", lambda *args, **kwargs: {
         "tool_calls": [{"tool_name": "list_alarms", "params": {}} for _ in range(50)],
         "reason": "runaway proposal",
     })

@@ -45,7 +45,13 @@ def validate_tool_calls(
     roles: list[str],
     message: str = "",
     task_id: str | None = None,
+    allowed_tool_names: set[str] | None = None,
 ) -> dict[str, Any]:
+    """allowed_tool_names, when given, additionally restricts calls to tools
+    that were actually offered to the tool-call planner this turn (the
+    tool_catalog_search "offered set") — narrowing what's allowed beyond plain
+    RBAC. None (the default) preserves prior behavior for every existing
+    caller."""
     violations = []
     approved_calls = []
     hitl_required = False
@@ -58,6 +64,9 @@ def validate_tool_calls(
             continue
         if not any(role in spec.auth_roles for role in roles):
             violations.append(f"{'/'.join(roles)} 角色无权调用工具：{tool_name}")
+            continue
+        if allowed_tool_names is not None and tool_name not in allowed_tool_names:
+            violations.append(f"该工具未在本轮检索候选中提供：{tool_name}")
             continue
 
         try:

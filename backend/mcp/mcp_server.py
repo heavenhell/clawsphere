@@ -52,9 +52,21 @@ def get_resource_overview() -> dict[str, Any]:
 
 
 @mcp.tool()
+def list_clusters() -> dict[str, Any]:
+    """List FusionCompute clusters and their capacity overview."""
+    return _call("list_clusters", {})
+
+
+@mcp.tool()
 def list_vms(status: str | None = None) -> dict[str, Any]:
     """List FusionCompute virtual machines."""
     return _call("list_vms", {"status": status})
+
+
+@mcp.tool()
+def get_vm_detail(vm_id: str) -> dict[str, Any]:
+    """Get a VM's detail, host and related alarms."""
+    return _call("get_vm_detail", {"vm_id": vm_id})
 
 
 @mcp.tool()

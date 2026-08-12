@@ -8,6 +8,7 @@ from typing import Any
 from rank_bm25 import BM25Okapi
 
 from backend.memory.knowledge_store import knowledge_store
+from backend.mcp.tools import TOOL_REGISTRY
 from backend.skills.loader import load_all_skills
 
 
@@ -99,14 +100,53 @@ def retrieve_history(query: str, roles: list[str], top_k: int = 3, tenant_id: st
 
 
 
-def retrieve_skill_detail(skill_id: str, roles: list[str], tenant_id: str = "global") -> dict[str, Any] | None:
-    ensure_knowledge_seeded()
-    expected = skill_id.replace(":tier2", ":tier3")
-    row = knowledge_store.get_knowledge(expected, roles, tenant_id)
-    if not row:
-        return None
-    return {
-        "id": row["id"], "doc_type": row["doc_type"], "tier": row["tier"],
-        "title": row["title"], "content": row["content"], "tags": json.loads(row["tags"]),
-        "score": 1.0, "retrieval_mode": "direct_id",
-    }
+_tool_corpus_lock = threading.Lock()
+_TOOL_CORPUS: list[dict[str, Any]] | None = None
+
+
+def _tool_corpus() -> list[dict[str, Any]]:
+    """In-memory, non-persisted index over TOOL_REGISTRY. Deliberately not routed
+    through knowledge_store: tool RBAC is an exact auth_roles membership check,
+    not knowledge_store's 3-tier permission model, so forcing tools through that
+    model would be fragile. TOOL_REGISTRY doesn't change after import, so this
+    is lazily built once."""
+    global _TOOL_CORPUS
+    if _TOOL_CORPUS is None:
+        with _tool_corpus_lock:
+            if _TOOL_CORPUS is None:
+                _TOOL_CORPUS = [
+                    {
+                        "tool_name": spec.name,
+                        "category": spec.category,
+                        "tags": spec.tags,
+                        "description": spec.description,
+                        "auth_roles": spec.auth_roles,
+                        "tokens": tokenize(f"{spec.name} {spec.description} {spec.category} {' '.join(spec.tags)}"),
+                    }
+                    for spec in TOOL_REGISTRY.values()
+                ]
+    return _TOOL_CORPUS
+
+
+def retrieve_tools(query: str, roles: list[str], tenant_id: str = "global", top_k: int = 5) -> list[dict[str, Any]]:
+    """RBAC-filter TOOL_REGISTRY first, then BM25-rank the allowed subset.
+    tenant_id is accepted for interface parity with retrieve()/retrieve_history()
+    even though tools aren't tenant-scoped today (TOOL_REGISTRY/call_tool() have
+    no tenant concept either)."""
+    candidates = [row for row in _tool_corpus() if any(role in row["auth_roles"] for role in roles)]
+    if not candidates:
+        return []
+    bm25 = BM25Okapi([row["tokens"] for row in candidates])
+    scores = bm25.get_scores(tokenize(query))
+    ranking = sorted(range(len(candidates)), key=lambda index: scores[index], reverse=True)[:top_k]
+    return [
+        {
+            "tool_name": candidates[index]["tool_name"],
+            "category": candidates[index]["category"],
+            "tags": candidates[index]["tags"],
+            "description": candidates[index]["description"],
+            "score": round(float(scores[index]), 5),
+            "retrieval_mode": "bm25",
+        }
+        for index in ranking
+    ]

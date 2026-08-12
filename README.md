@@ -17,11 +17,13 @@ flowchart LR
     MCP --> AUDIT[Audit + Prometheus]
 ```
 
-Agent 主链路：`context -> retrieval -> llm_router -> guardrail -> HITL/executor -> llm_responder -> memory`。
+Agent 主链路（四阶段渐进式工具/技能加载，详见 [docs/four-stage-agent-architecture-proposal.md](docs/four-stage-agent-architecture-proposal.md)）：
+`context -> history_retriever -> skill_router(LLM1) -> skill_loader -> tool_search_planner(LLM2) -> tool_catalog_search -> tool_call_planner(LLM3) -> guardrail -> HITL/executor -> llm_responder(LLM4) -> memory`。
+`direct_answer`/`clarification_required`/无候选工具三处短路可以跳过后续规划阶段直接进入 Responder。
 
 架构原则：**认知判断全部交给大模型，安全裁决全部由代码强制。**
 
-- LLM 路由：大模型用 structured tool-calling 自行决定调用哪些只读工具或直接回答；意图分类、指代消解、术语识别都是大模型的语义能力，代码不再写死关键词规则。
+- 三段式规划：Skill 选择、工具检索、工具调用各自是一次窄范围的 LLM 调用，每个阶段只看到当前决策所需的最小上下文（Skill 目录仅一句话摘要、候选工具仅 BM25 检索命中的少量完整 schema），而不是像早期版本那样一次性把全部工具 Schema 摊给模型；意图分类、指代消解、术语识别都是大模型的语义能力，代码不再写死关键词规则。
 - 结构化校验：回答用 JSON schema 约束，模型自申报其引用的每个资源 ID（举例 vs 状态断言）；代码确定性核对——状态断言必须有本轮工具数据支撑，凭空捏造的资源被拒。
 - 安全护栏（代码写死、大模型无法绕过）：写操作必须经 RBAC + HITL 审批且匹配已批准的工具与参数；单轮工具调用数上限防死循环；按用户/租户限流。写工具不能从 FastAPI 或 MCP 通道绕过 HITL。
 - 本系统的意图理解与回答生成依赖大模型：未配置 `DEEPSEEK_API_KEY` 或无法连接时，系统明确提示需要对接大模型，不提供确定性兜底回答。

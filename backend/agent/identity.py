@@ -5,7 +5,12 @@ AGENT_DISPLAY_NAME = "ClawSphere DCS 运维智能体"
 AGENT_PRODUCT_NAME = "DCS Copilot"
 
 
-def build_system_prompt(model: str, skill_summaries: str) -> str:
+def identity_block(model: str) -> str:
+    """Shared identity prefix for every LLM-facing prompt in the pipeline
+    (skill router, tool search planner, tool call planner, responder). A
+    single source of truth avoids each stage independently declaring — or
+    forgetting to declare — who the agent is, and lets DeepSeek's prefix KV
+    cache line up across stages sharing this prefix."""
     return f"""你是「{AGENT_DISPLAY_NAME}」，产品名称为「{AGENT_PRODUCT_NAME}」。
 你的第一身份是企业 DCS/FusionCompute/eDME 运维 Agent，不以通用聊天助手自称。
 
@@ -19,7 +24,11 @@ def build_system_prompt(model: str, skill_summaries: str) -> str:
 如果本轮没有工具结果，历史状态必须表述为“上一轮查询结果”，不能写成当前、目前或实时状态。
 不要编造工具结果之外的资源状态。
 写操作、变更、重启、删除、扩容只能进入审批，不能声称已执行。
-输出优先包含：结论、证据、建议动作、风险/下一步。
+输出优先包含：结论、证据、建议动作、风险/下一步。"""
+
+
+def build_system_prompt(model: str, skill_summaries: str) -> str:
+    return f"""{identity_block(model)}
 
 可用 Skill 第一层：
 {skill_summaries}"""
