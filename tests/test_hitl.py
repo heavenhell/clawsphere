@@ -396,6 +396,53 @@ def test_llm1_then_llm2_then_llm3_call_order_on_the_full_tool_path(monkeypatch):
     assert order == ["skill_router", "tool_search_planner", "tool_call_planner"]
 
 
+def test_route_decisions_records_one_structured_entry_per_planning_stage(monkeypatch):
+    monkeypatch.setattr(copilot, "_call_skill_router", lambda *args, **kwargs: {
+        "decision": "use_skill",
+        "skill_ids": ["resource_query"],
+        "arguments": {},
+        "confidence": 0.9,
+        "missing_context": [],
+        "reason_summary": "skill reason",
+    })
+    monkeypatch.setattr(copilot, "_call_tool_search_planner", lambda *args, **kwargs: {
+        "tool_calls": [{
+            "tool_name": "ToolSearch",
+            "params": {"query": "list_alarms", "top_k": 5, "required_capabilities": []},
+        }],
+        "reason": "",
+    })
+    monkeypatch.setattr(copilot, "_call_tool_call_planner", lambda *args, **kwargs: {
+        "tool_calls": [{"tool_name": "list_alarms", "params": {}}], "reason": "call reason",
+    })
+
+    result = run_copilot("现在有哪些告警", ["readonly"])
+
+    stages = [entry["stage"] for entry in result["route_decisions"]]
+    assert stages == ["skill_router", "tool_search_planner", "tool_call_planner"]
+    skill_entry, search_entry, call_entry = result["route_decisions"]
+    assert skill_entry["decision"] == "use_skill"
+    assert skill_entry["detail"]["skill_ids"] == ["resource_query"]
+    assert search_entry["decision"] == "tool_search"
+    assert search_entry["detail"]["query"] == "list_alarms"
+    assert call_entry["decision"] == "tool_calls_proposed"
+    assert call_entry["detail"]["tool_names"] == ["list_alarms"]
+
+
+def test_route_decisions_records_single_entry_on_direct_answer_short_circuit(monkeypatch):
+    monkeypatch.setattr(copilot, "_call_skill_router", lambda *args, **kwargs: {
+        "decision": "direct_answer",
+        "skill_ids": [],
+        "arguments": {},
+        "confidence": 0.95,
+        "missing_context": [],
+        "reason_summary": "寒暄，无需工具",
+    })
+    result = run_copilot("你好", ["readonly"])
+    assert [entry["stage"] for entry in result["route_decisions"]] == ["skill_router"]
+    assert result["route_decisions"][0]["decision"] == "direct_answer"
+
+
 def test_llm_responder_preserves_upstream_fallback_reason_instead_of_overwriting_it():
     """llm_available=False can come from a genuinely unconfigured LLM OR from
     the call budget being exhausted — these must stay distinguishable in

@@ -305,6 +305,16 @@ def _record_step(state: CopilotState, entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _route_entry(stage: str, decision: str, reason: str = "", **detail: Any) -> dict[str, Any]:
+    """One structured record per planning-stage outcome, appended to
+    route_decisions — the machine-readable counterpart to `plan`'s
+    human-readable, cross-stage-accumulated reason chain."""
+    entry: dict[str, Any] = {"stage": stage, "decision": decision, "reason": reason}
+    if detail:
+        entry["detail"] = detail
+    return entry
+
+
 # --- Context / retrieval (feed the model) ------------------------------------
 
 def context_loader(state: CopilotState) -> CopilotState:
@@ -410,12 +420,17 @@ def skill_router(state: CopilotState) -> CopilotState:
     straight to tool search with no Skill, a direct answer, or clarification —
     seeing only role-filtered Skill one-liners and role-filtered tool
     name+description (tier1, no parameter schema)."""
+    route_decisions = state.get("route_decisions", [])
     if _budget_exhausted(state):
         return {
             "skill_decision": {},
             "plan_source": "skill_router_fallback",
             "intent": "direct_answer",
             "fallback_reason": "llm_call_budget_exhausted",
+            "route_decisions": [
+                *route_decisions,
+                _route_entry("skill_router", "budget_exhausted", "llm_call_budget_exhausted"),
+            ],
         }
     started = perf_counter()
     decision = _call_skill_router(_skill_router_payload(state))
@@ -428,6 +443,7 @@ def skill_router(state: CopilotState) -> CopilotState:
             "plan_source": "llm_unavailable",
             "llm_available": False,
             "intent": "unavailable",
+            "route_decisions": [*route_decisions, _route_entry("skill_router", "llm_unavailable")],
         }
     choice = decision.get("decision")
     skill_ids = [str(item) for item in (decision.get("skill_ids") or []) if item]
@@ -439,13 +455,46 @@ def skill_router(state: CopilotState) -> CopilotState:
         "llm_available": True,
     }
     if choice == "use_skill" and skill_ids:
-        return {**base, "selected_skill_ids": skill_ids, "plan_source": "skill_router", "intent": "tool_execution"}
+        return {
+            **base,
+            "selected_skill_ids": skill_ids,
+            "plan_source": "skill_router",
+            "intent": "tool_execution",
+            "route_decisions": [
+                *route_decisions,
+                _route_entry(
+                    "skill_router", "use_skill", reason,
+                    skill_ids=skill_ids, confidence=decision.get("confidence"),
+                ),
+            ],
+        }
     if choice == "use_tool_directly":
-        return {**base, "plan_source": "skill_router_use_tool_directly", "intent": "tool_execution"}
+        return {
+            **base,
+            "plan_source": "skill_router_use_tool_directly",
+            "intent": "tool_execution",
+            "route_decisions": [*route_decisions, _route_entry("skill_router", "use_tool_directly", reason)],
+        }
     if choice == "clarification_required":
-        return {**base, "plan_source": "skill_router_clarification", "intent": "clarification_required"}
+        return {
+            **base,
+            "plan_source": "skill_router_clarification",
+            "intent": "clarification_required",
+            "route_decisions": [
+                *route_decisions,
+                _route_entry(
+                    "skill_router", "clarification_required", reason,
+                    missing_context=decision.get("missing_context"),
+                ),
+            ],
+        }
     if choice == "direct_answer":
-        return {**base, "plan_source": "skill_router_direct_answer", "intent": "direct_answer"}
+        return {
+            **base,
+            "plan_source": "skill_router_direct_answer",
+            "intent": "direct_answer",
+            "route_decisions": [*route_decisions, _route_entry("skill_router", "direct_answer", reason)],
+        }
     # Malformed/unrecognized decision, or use_skill with no ids: fail closed to
     # a direct answer rather than retrying — only the Responder retries here.
     return {
@@ -453,6 +502,7 @@ def skill_router(state: CopilotState) -> CopilotState:
         "plan_source": "skill_router_fallback",
         "intent": "direct_answer",
         "fallback_reason": "skill_router_invalid_output",
+        "route_decisions": [*route_decisions, _route_entry("skill_router", "invalid_output", reason)],
     }
 
 
@@ -470,11 +520,16 @@ def route_after_skill_router(state: CopilotState) -> Literal["skill_loader", "to
 def tool_search_planner(state: CopilotState) -> CopilotState:
     """LLM2: given the fully-loaded Skill, decide whether real tool data is
     needed and, if so, "call" the synthetic ToolSearch tool with a query."""
+    route_decisions = state.get("route_decisions", [])
     if _budget_exhausted(state):
         return {
             "tool_search_request": {},
             "plan_source": "tool_search_declined",
             "fallback_reason": "llm_call_budget_exhausted",
+            "route_decisions": [
+                *route_decisions,
+                _route_entry("tool_search_planner", "budget_exhausted", "llm_call_budget_exhausted"),
+            ],
         }
     started = perf_counter()
     result = _call_tool_search_planner(
@@ -484,7 +539,13 @@ def tool_search_planner(state: CopilotState) -> CopilotState:
     step = _record_step(state, _stage_metric("tool_search_planner", started, result is not None))
     plan = state.get("plan", [])
     if result is None:
-        return {**step, "tool_search_request": {}, "llm_available": False, "plan_source": "llm_unavailable"}
+        return {
+            **step,
+            "tool_search_request": {},
+            "llm_available": False,
+            "plan_source": "llm_unavailable",
+            "route_decisions": [*route_decisions, _route_entry("tool_search_planner", "llm_unavailable")],
+        }
     search_call = next(
         (call for call in (result.get("tool_calls") or []) if call.get("tool_name") == "ToolSearch"),
         None,
@@ -496,6 +557,7 @@ def tool_search_planner(state: CopilotState) -> CopilotState:
             "tool_search_request": {},
             "plan": [*plan, reason] if reason else plan,
             "plan_source": "tool_search_declined",
+            "route_decisions": [*route_decisions, _route_entry("tool_search_planner", "declined", reason)],
         }
     try:
         validated = ToolSearchRequest.model_validate(search_call.get("params") or {})
@@ -505,12 +567,21 @@ def tool_search_planner(state: CopilotState) -> CopilotState:
             "tool_search_request": {},
             "plan_source": "tool_search_invalid_output",
             "fallback_reason": "tool_search_invalid_output",
+            "route_decisions": [*route_decisions, _route_entry("tool_search_planner", "invalid_output")],
         }
     return {
         **step,
         "tool_search_request": validated.model_dump(),
         "plan": [*plan, f"检索工具: {validated.query}"],
         "plan_source": "tool_search_planner",
+        "route_decisions": [
+            *route_decisions,
+            _route_entry(
+                "tool_search_planner", "tool_search",
+                query=validated.query, top_k=validated.top_k,
+                required_capabilities=validated.required_capabilities,
+            ),
+        ],
     }
 
 
@@ -529,6 +600,7 @@ def tool_call_planner(state: CopilotState) -> CopilotState:
     found, decide the real tool_calls. Functionally the old llm_router's tool
     selection, narrowed to a pre-filtered candidate set instead of the full
     RBAC catalog."""
+    route_decisions = state.get("route_decisions", [])
     if _budget_exhausted(state):
         return {
             "tool_calls_proposed": [],
@@ -537,6 +609,10 @@ def tool_call_planner(state: CopilotState) -> CopilotState:
             "step_budget_hit": False,
             "intent": "unavailable",
             "fallback_reason": "llm_call_budget_exhausted",
+            "route_decisions": [
+                *route_decisions,
+                _route_entry("tool_call_planner", "budget_exhausted", "llm_call_budget_exhausted"),
+            ],
         }
     tools = state.get("selected_tool_schemas") or []
     started = perf_counter()
@@ -550,6 +626,7 @@ def tool_call_planner(state: CopilotState) -> CopilotState:
             "llm_available": False,
             "step_budget_hit": False,
             "intent": "unavailable",
+            "route_decisions": [*route_decisions, _route_entry("tool_call_planner", "llm_unavailable")],
         }
     calls = plan.get("tool_calls", []) or []
     step_budget_hit = len(calls) > MAX_TOOL_CALLS_PER_TURN
@@ -564,6 +641,13 @@ def tool_call_planner(state: CopilotState) -> CopilotState:
         "llm_available": True,
         "step_budget_hit": step_budget_hit,
         "intent": "tool_execution" if calls else "direct_answer",
+        "route_decisions": [
+            *route_decisions,
+            _route_entry(
+                "tool_call_planner", "tool_calls_proposed" if calls else "no_tool_calls", reason,
+                tool_names=[call.get("tool_name") for call in calls], step_budget_hit=step_budget_hit,
+            ),
+        ],
     }
 
 

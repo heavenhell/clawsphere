@@ -111,7 +111,7 @@ Skill 决策链         skill_decision, selected_skill_ids, loaded_skills, skill
 输出                 final_response, resource_claims, response_source
 ```
 
-`plan`（`list[str]`）是跨阶段**累加**的人类可读原因链（Skill 选择原因 → 工具检索原因 → 工具调用原因），前端渲染成 chip 列表；`route_decisions` 是结构化版本，目前状态字段已声明但节点尚未逐个写入结构化条目（见第八节已知限制）。
+`plan`（`list[str]`）是跨阶段**累加**的人类可读原因链（Skill 选择原因 → 工具检索原因 → 工具调用原因），前端渲染成 chip 列表；`route_decisions` 是结构化版本，`skill_router`/`tool_search_planner`/`tool_call_planner` 三个规划节点的每条返回分支都会追加一条 `{stage, decision, reason, detail?}` 记录（`_route_entry()`，`copilot.py`），一一对应 `plan` 累加的同一组决策点。回归测试：`test_route_decisions_records_one_structured_entry_per_planning_stage`、`test_route_decisions_records_single_entry_on_direct_answer_short_circuit`。
 
 ## 五、四个 LLM 阶段的输入/输出契约
 
