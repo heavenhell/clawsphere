@@ -17,6 +17,7 @@ import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, cast
 
 import pytest
 
@@ -25,7 +26,9 @@ from backend.agent import audit_log
 from backend.agent.audit_log import (
     MAX_AUDIT_RECORD_BYTES,
     _GzipDailyRotatingFileHandler,
+    _format_session_text,
     _prune_expired,
+    export_session,
     log_grounding_rejection,
     log_session_turn,
 )
@@ -58,7 +61,7 @@ def isolated_logs(tmp_path, monkeypatch):
     audit_log._loggers.clear()
 
 
-def _read_jsonl(path) -> list[dict]:
+def _read_jsonl(path) -> list[dict[str, Any]]:
     return [
         json.loads(line)
         for line in path.read_text(encoding="utf-8").splitlines()
@@ -240,7 +243,7 @@ def test_llm_responder_records_rejected_answers(monkeypatch):
     monkeypatch.setattr(copilot, "get_last_llm_usage", lambda: None)
     monkeypatch.setattr(copilot, "log_grounding_rejection", lambda **kw: rejected.append(kw))
 
-    result = llm_responder({})
+    result = cast(Any, llm_responder({}))
 
     assert result["response_source"] == "grounding_guard"
     assert result["fallback_reason"] == "grounding_rejected"
@@ -291,7 +294,7 @@ def test_memory_writer_logs_full_turn(monkeypatch):
         "conversation_summary": "",
     }
 
-    result = memory_writer(state)
+    result = memory_writer(cast(Any, state))
 
     assert result == {"summary": "message=查询 dcs-app-01; tools=['get_vm_metrics']"}
     assert captured["conversation_id"] == "c-1"
@@ -302,3 +305,120 @@ def test_memory_writer_logs_full_turn(monkeypatch):
     assert captured["tool_calls"] == [{"tool_name": "get_vm_metrics"}]
     assert captured["tool_results"] == [{"tool_name": "get_vm_metrics"}]
     assert captured["agent_step_count"] == 2
+
+
+# --- session export tests ---------------------------------------------------
+
+
+def _dump_jsonl(path, records):
+    path.write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in records) + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_export_session_filters_and_sorts(tmp_path):
+    log_file = tmp_path / "session_turns.log"
+    _dump_jsonl(log_file, [
+        {"ts": "2026-08-18T10:00:00+00:00", "conversation_id": "c-1", "message": "第二轮"},
+        {"ts": "2026-08-18T09:00:00+00:00", "conversation_id": "c-2", "message": "别人的"},
+        {"ts": "2026-08-18T08:00:00+00:00", "conversation_id": "c-1", "message": "第一轮"},
+    ])
+
+    result = export_session("c-1", log_file)
+
+    assert [r["message"] for r in result] == ["第一轮", "第二轮"]
+    assert all(r["conversation_id"] == "c-1" for r in result)
+
+
+def test_export_session_reads_gzip_archives(tmp_path):
+    log_file = tmp_path / "session_turns.log"
+    _dump_jsonl(log_file, [
+        {"ts": "2026-08-19T10:00:00+00:00", "conversation_id": "c-1", "message": "今天"},
+    ])
+    archive = tmp_path / "session_turns.log.2026-08-18.gz"
+    with gzip.open(archive, "wt", encoding="utf-8") as f:
+        f.write(json.dumps(
+            {"ts": "2026-08-18T09:00:00+00:00", "conversation_id": "c-1", "message": "昨天"},
+            ensure_ascii=False,
+        ) + "\n")
+
+    result = export_session("c-1", log_file)
+
+    assert [r["message"] for r in result] == ["昨天", "今天"]
+
+
+def test_export_session_skips_corrupt_lines(tmp_path):
+    log_file = tmp_path / "session_turns.log"
+    log_file.write_text(
+        '{"ts":"2026-08-18T09:00:00+00:00","conversation_id":"c-1","message":"ok"}\n'
+        "not-json\n"
+        '{"broken": \n'
+        "[]\n"
+        '{"ts":"2026-08-18T10:00:00+00:00","conversation_id":"c-1","message":"also ok"}\n',
+        encoding="utf-8",
+    )
+
+    result = export_session("c-1", log_file)
+
+    assert [r["message"] for r in result] == ["ok", "also ok"]
+
+
+def test_export_session_requires_non_empty_id(tmp_path):
+    with pytest.raises(ValueError):
+        export_session("", tmp_path / "session_turns.log")
+
+
+def test_export_session_missing_file_returns_empty(tmp_path):
+    assert export_session("c-1", tmp_path / "nope.log") == []
+
+
+def test_format_session_text_includes_dialogue():
+    records = [
+        {
+            "ts": "2026-08-18T09:00:00+00:00",
+            "task_id": "t-1",
+            "intent": "tool_execution",
+            "response_source": "deepseek",
+            "message": "查询 dcs-app-01",
+            "answer": "正常回答",
+        },
+    ]
+    text = _format_session_text(records)
+    assert "[user]" in text
+    assert "[assistant]" in text
+    assert "查询 dcs-app-01" in text
+    assert "正常回答" in text
+    assert "tool_execution" in text
+
+
+def test_format_session_text_verbose_includes_route_decisions():
+    records = [
+        {
+            "ts": "2026-08-18T09:00:00+00:00",
+            "conversation_id": "c-1",
+            "message": "hi",
+            "answer": "a",
+            "route_decisions": [{"stage": "llm_responder", "decision": "grounding_rejected"}],
+        },
+    ]
+    text = _format_session_text(records, verbose=True)
+    assert "-- route_decisions --" in text
+    assert "grounding_rejected" in text
+
+
+def test_format_session_text_empty():
+    assert _format_session_text([]) == "(no records found)"
+
+
+def test_main_json_output(tmp_path, capsys):
+    log_file = tmp_path / "session_turns.log"
+    _dump_jsonl(log_file, [
+        {"ts": "2026-08-18T09:00:00+00:00", "conversation_id": "c-1", "message": "hi"},
+    ])
+
+    rc = audit_log.main(["c-1", "--log", str(log_file), "--format", "json"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert json.loads(out)[0]["message"] == "hi"

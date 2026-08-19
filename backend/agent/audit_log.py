@@ -221,3 +221,122 @@ def log_session_turn(record: dict[str, Any]) -> None:
         SESSION_LOG_FILE,
         {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), **record},
     )
+
+
+# --- Session export ----------------------------------------------------------
+
+
+def _read_log_file(path: Path) -> list[dict[str, Any]]:
+    """Parse every JSON record from a log file (gzip or plain), skipping blank
+    and malformed lines so a single bad write can't break an export."""
+    records: list[dict[str, Any]] = []
+    opener = gzip.open if path.suffix == ".gz" else open
+    mode = "rt" if path.suffix == ".gz" else "r"
+    try:
+        with opener(path, mode, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(record, dict):
+                    records.append(record)
+    except OSError:
+        return records
+    return records
+
+
+def export_session(
+    conversation_id: str,
+    log_file: Path = SESSION_LOG_FILE,
+) -> list[dict[str, Any]]:
+    """Return every turn of ``conversation_id`` in chronological order.
+
+    Reads the live log plus all of its gzip archives in the same directory, so
+    a session can be reconstructed even after daily rotation has archived some
+    of its turns. Records are already sanitized by ``log_session_turn``.
+    """
+    if not conversation_id:
+        raise ValueError("conversation_id must be non-empty")
+
+    records: list[dict[str, Any]] = []
+    if log_file.exists():
+        records.extend(_read_log_file(log_file))
+
+    log_dir = log_file.parent
+    if log_dir.exists():
+        prefix = log_file.name + "."
+        for archive in sorted(log_dir.glob(prefix + "*.gz")):
+            records.extend(_read_log_file(archive))
+
+    matched = [r for r in records if r.get("conversation_id") == conversation_id]
+    matched.sort(key=lambda r: r.get("ts", ""))
+    return matched
+
+
+def _format_session_text(records: list[dict[str, Any]], verbose: bool = False) -> str:
+    if not records:
+        return "(no records found)"
+
+    lines: list[str] = []
+    for i, r in enumerate(records, 1):
+        lines.append(f"===== Turn {i} · {r.get('ts', '')} =====")
+        lines.append(f"task_id: {r.get('task_id', '')}")
+        meta = " | ".join(
+            f"{k}: {r.get(k)}" for k in ("intent", "response_source", "fallback_reason") if r.get(k)
+        )
+        lines.append(meta or "(no stage metadata)")
+        lines.append("")
+        lines.append(f"[user] {r.get('message', '')}")
+        lines.append("")
+        lines.append(f"[assistant] {r.get('answer', '')}")
+        if verbose:
+            for section, value in (
+                ("route_decisions", r.get("route_decisions", [])),
+                ("tool_calls", r.get("tool_calls", [])),
+                ("tool_results", r.get("tool_results", [])),
+                ("resource_claims", r.get("resource_claims", [])),
+                ("llm_stage_metrics", r.get("llm_stage_metrics", [])),
+                ("plan", r.get("plan", [])),
+            ):
+                if value:
+                    lines.append("")
+                    lines.append(f"-- {section} --")
+                    lines.append(json.dumps(value, ensure_ascii=False, indent=2, default=str))
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Export a full conversation from the session audit log "
+        "(reads the live log plus its gzip archives)."
+    )
+    parser.add_argument("conversation_id", help="conversation_id to reconstruct")
+    parser.add_argument(
+        "--format", choices=["text", "json"], default="text",
+        help="output format (default: text)",
+    )
+    parser.add_argument(
+        "--log", default=None,
+        help="path to session_turns.log (default: logs/session_turns.log)",
+    )
+    parser.add_argument(
+        "--verbose", action="store_true",
+        help="include route_decisions/tool_calls/metrics in text output",
+    )
+    args = parser.parse_args(argv)
+
+    log_file = Path(args.log) if args.log else SESSION_LOG_FILE
+    records = export_session(args.conversation_id, log_file)
+
+    if args.format == "json":
+        print(json.dumps(records, ensure_ascii=False, indent=2, default=str))
+    else:
+        print(_format_session_text(records, verbose=args.verbose))
+    return 0
