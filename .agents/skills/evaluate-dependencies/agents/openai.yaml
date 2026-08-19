@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evaluate Dependencies"
+  short_description: "Assess existing and third-party dependencies before coding"
+  default_prompt: "Use $evaluate-dependencies to determine whether an existing or mature dependency should be reused before implementing this capability."

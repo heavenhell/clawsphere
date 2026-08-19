@@ -10,3 +10,8 @@ dist/
 output/
 .playwright-cli/
 eval/report.json
+
+# Local network and request diagnostics
+/_diag.py
+/_test_req.json
+/proxysg_ca.pem

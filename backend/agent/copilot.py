@@ -42,6 +42,7 @@ from backend.skills.loader import (
     startup_skill_summaries,
 )
 from backend.observability import observe_agent
+from backend.agent.audit_log import log_grounding_rejection, log_session_turn
 
 
 # --- Configuration -----------------------------------------------------------
@@ -890,6 +891,7 @@ def llm_responder(state: CopilotState) -> CopilotState:
     last_reason = "grounding_rejected"
     step_count = state.get("agent_step_count", 0)
     stage_metrics = list(state.get("llm_stage_metrics", []))
+    route_decisions = list(state.get("route_decisions", []))
     for attempt in range(3):
         if step_count >= MAX_LLM_CALLS_PER_TURN:
             last_reason = "llm_call_budget_exhausted"
@@ -935,7 +937,25 @@ def llm_responder(state: CopilotState) -> CopilotState:
                 "fallback_reason": None,
                 "agent_step_count": step_count,
                 "llm_stage_metrics": stage_metrics,
+                "route_decisions": route_decisions,
             }
+        # Grounding rejected: keep the rejected answer and reason in the
+        # API-observable route_decisions and a sanitized, daily-rotating audit
+        # log so the otherwise-ephemeral output can be investigated.
+        route_decisions.append(
+            _route_entry(
+                "llm_responder", "grounding_rejected", reason,
+                attempt=attempt + 1, answer=answer, claims=claims,
+            )
+        )
+        log_grounding_rejection(
+            answer=answer,
+            reason=reason,
+            attempt=attempt + 1,
+            conversation_id=state.get("conversation_id", ""),
+            task_id=state.get("task_id", ""),
+            claims=claims,
+        )
         feedback = reason
         last_reason = "grounding_rejected"
 
@@ -949,6 +969,7 @@ def llm_responder(state: CopilotState) -> CopilotState:
         "fallback_reason": last_reason,
         "agent_step_count": step_count,
         "llm_stage_metrics": stage_metrics,
+        "route_decisions": route_decisions,
     }
 
 
@@ -969,6 +990,27 @@ def memory_writer(state: CopilotState) -> CopilotState:
         state.get("final_response", ""),
         state.get("conversation_summary", ""),
     )
+    # Persist a sanitized turn record (normal answers included) so a
+    # conversation can be investigated or replayed from disk later.
+    log_session_turn({
+        "conversation_id": state.get("conversation_id"),
+        "task_id": state.get("task_id"),
+        "user_id": state.get("user_id"),
+        "tenant_id": state.get("tenant_id"),
+        "message": state.get("message"),
+        "answer": state.get("final_response", ""),
+        "intent": state.get("intent"),
+        "response_source": state.get("response_source"),
+        "fallback_reason": state.get("fallback_reason"),
+        "route_decisions": state.get("route_decisions", []),
+        "llm_stage_metrics": state.get("llm_stage_metrics", []),
+        "tool_calls": state.get("tool_calls_proposed", []),
+        "tool_results": state.get("tool_results", []),
+        "resource_claims": state.get("resource_claims", []),
+        "skill_decision": state.get("skill_decision", {}),
+        "plan": state.get("plan", []),
+        "agent_step_count": state.get("agent_step_count", 0),
+    })
     return {"summary": turn_summary}
 
 
