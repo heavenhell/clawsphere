@@ -15,6 +15,7 @@ from backend.agent.llm import (
     call_deepseek_agent_plan,
     call_deepseek_json,
     get_last_llm_usage,
+    get_last_llm_request_budget,
     get_llm_status,
     get_public_llm_status,
     reset_llm_request_status,
@@ -384,6 +385,7 @@ def _budget_exhausted(state: CopilotState) -> bool:
 
 def _stage_metric(stage: str, started: float, success: bool, summary: str = "") -> dict[str, Any]:
     usage = get_last_llm_usage() if success else None
+    request_budget = get_last_llm_request_budget()
     return {
         "stage": stage,
         "latency_ms": int((perf_counter() - started) * 1000),
@@ -391,6 +393,8 @@ def _stage_metric(stage: str, started: float, success: bool, summary: str = "") 
         "model": DEEPSEEK_MODEL,
         "prompt_tokens": (usage or {}).get("prompt_tokens"),
         "completion_tokens": (usage or {}).get("completion_tokens"),
+        "request_bytes": (request_budget or {}).get("final_bytes"),
+        "request_compressed": (request_budget or {}).get("compressed"),
         "summary": summary,
     }
 

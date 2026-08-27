@@ -64,6 +64,9 @@ pip install -r requirements-observability.txt
 - `DEEPSEEK_API_KEY`：启用 LLM intent、structured planner、摘要和回答生成。
 - `DEEPSEEK_MODEL`：当前端点支持 `deepseek-v4-pro` 和 `deepseek-v4-flash`，默认使用 `deepseek-v4-pro`。
 - `DEEPSEEK_API_URL`：仅接受标准 HTTPS `api.deepseek.com` Chat Completions 地址，避免把凭据发送到错误主机。
+- `DCS_LLM_SEMANTIC_COMPRESSION`：默认 `true`；请求 body 超过 90 KiB 时启用本机语义压缩。
+- `DCS_LLM_COMPRESSOR_URL`：本机 Ollama Chat API，仅允许 loopback `/api/chat` 地址。
+- `DCS_LLM_COMPRESSOR_MODEL`：默认 `qwen3.5:4b-q4_K_M`；首次使用前运行 `ollama pull qwen3.5:4b-q4_K_M`。
 - `DCS_MEMORY_BACKEND=postgres`：Skill 存储切换到 PostgreSQL/pgvector。
 - `DCS_CHECKPOINT_BACKEND=postgres`：LangGraph checkpoint 切换到 PostgresSaver。
 - `DCS_CORS_ORIGINS`：逗号分隔的前端允许来源；生产环境应设置为实际部署域名。
@@ -76,7 +79,10 @@ pip install -r requirements-observability.txt
 Agent 的固定产品身份为“ClawSphere DCS 运维智能体（DCS Copilot）”。聊天响应包含脱敏的
 `response_source`、`llm_status` 和 `context`，前端会明确显示 DeepSeek 正常、降级或未配置状态。
 对话历史使用 3000 token 预算，组合旧对话摘要、相关历史、最近消息和结构化工作状态；所有 LLM
-出站 payload 还会执行敏感字段脱敏和 64 KiB 硬上限。身份与安全规则
+出站 payload 会先执行敏感字段脱敏，再由本地请求预算门精确序列化为 UTF-8 JSON：不超过
+90 KiB（92,160 字节）直接发送，超限时仅压缩历史消息并以 80 KiB 为目标重新复检；固定
+system/developer 指令、当前用户请求和工具 schema 不参与压缩。压缩器不可用或最终 body
+仍超限时失败关闭，绝不会向外部模型发送超过 90 KiB 的请求。身份与安全规则
 始终位于固定系统提示词中，不参与对话压缩。同一会话存在待审批写操作时，新消息会返回
 HTTP 409，必须先完成审批，以防止历史记录和摘要发生乱序。
 
