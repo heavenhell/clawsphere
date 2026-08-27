@@ -6,7 +6,9 @@
 >
 > **变更记录**：在这版核对通过之后，又追加了一版修订——[skill-router-tool-fallback-plan.md](./skill-router-tool-fallback-plan.md)：给 LLM1（`skill_router`）加了工具目录的 tier1 可见性（仅名字+分类+一句话描述，不含参数 schema），并给它的决策契约加了第四个值 `use_tool_directly`，让"没有 Skill 覆盖，但工具目录里能看出需要哪类数据"的请求不再必须先命中 Skill 才能碰到工具。本文档已经是**合并了这次修订之后**的状态，不再单独区分"修订前/修订后"。
 >
-> 全部 99 个测试通过，且在任意文件执行顺序下稳定（含逆序、单文件、全量四种组合的交叉验证）。
+> **Agent loop 修订（2026-08-27）**：工具执行结果会回到工具检索阶段形成有界 observation loop；固定四阶段仍是首轮路径，不再代表整轮最多只执行一次工具规划。
+>
+> 当前全量测试基线为 114 个。
 
 ## 一、系统边界
 
@@ -61,6 +63,10 @@ sequenceDiagram
                     end
                     H->>T: tool_executor（authorization_epoch复检+执行）
                     T-->>H: tool_results
+                    opt 只读工具且循环/工具/LLM预算均有剩余
+                        H->>L: 将累计 tool_results 作为不可信 observation 回到 LLM2
+                        note over H,L: 重复工具检索→候选→调用→护栏→执行，或模型停止调用
+                    end
                 end
             end
         end
@@ -72,7 +78,7 @@ sequenceDiagram
     H-->>U: answer
 ```
 
-标准工具路径（用户消息需要真实数据）观察到 **3 次规划 LLM 调用 + 1 次回答 LLM 调用 = 4 次**。寒暄/身份/概念问题在 LLM1 后直接短路，只有 1 次规划调用 + 1 次回答调用。这是设计上的差异化路径，不是退化。
+标准工具路径首轮仍是 **3 次规划 LLM 调用**。只读工具执行后，结果作为不可信 observation 回到 LLM2；模型可停止并进入回答，也可继续“工具检索 → 工具调用 → 护栏 → 执行”。寒暄/身份/概念问题仍在 LLM1 后短路。整轮由 3 个代码硬预算共同封顶：最多 3 轮工具执行、累计 8 次工具调用、累计 8 次 LLM 调用（含最终回答及其重试）。
 
 **"没有值"从不是错误状态**，是每一步都合法的路径：`skill_loader` 一个 Skill 都没解析出来 → 不短路，带着空上下文继续；`tool_catalog_search` 没候选、`tool_call_planner` 有候选但一个都不选、或 `guardrail` 把提议的工具全部拒绝（RBAC/offered-set/参数/限流任一失败）→ 这三种都直接跳到 `llm_responder`，`tool_executor`（对应图里的 MCP/`TOOL_REGISTRY` 执行）完全不会被调用。Responder 拿到空 `tool_results` 照样要回答，只是 `verify_resource_claims` 会挡掉任何没有工具数据支撑的资源状态断言（`copilot.py:671`），逼它要么诚实说"没有数据"，要么把内容降级成"举例"而不是"当前状态"。四条短路边对应的路由函数：`route_after_skill_router`（`copilot.py:451`）、`route_after_tool_search`（`copilot.py:507`）、`route_after_tool_catalog_search`（`copilot.py:513`）、`route_after_guardrail`（`copilot.py:885`）。
 
@@ -106,7 +112,8 @@ sequenceDiagram
 Skill 决策链         skill_decision, selected_skill_ids, loaded_skills, skill_catalog_version
 工具检索链           tool_search_request, tool_search_candidates, selected_tool_schemas, tool_catalog_version
 执行链（不变）        tool_calls_proposed, tool_results, hitl_required, hitl_approved, execution_log
-安全/预算            authorization_epoch, agent_step_count, step_budget_hit
+安全/预算            authorization_epoch, agent_step_count, agent_tool_rounds,
+                     tool_calls_executed, step_budget_hit
 观测                 route_decisions, plan, plan_source, llm_stage_metrics, fallback_reason
 输出                 final_response, resource_claims, response_source
 ```
@@ -139,7 +146,7 @@ Skill 决策链         skill_decision, selected_skill_ids, loaded_skills, skill
 ### LLM3 — `tool_call_planner`（`TOOL_CALL_PROMPT`, `copilot.py:143`）
 
 - 输入：`IDENTITY_BLOCK` + 完整 Skill 内容 + 会话历史 + **仅** `tool_catalog_search` 命中的候选 schema（`state["selected_tool_schemas"]`）。
-- 输出：`tool_calls[]` + `reason`，套用原有的 `MAX_TOOL_CALLS_PER_TURN=8` 硬顶（沿用旧 `llm_router` 的截断逻辑，行为完全一致）。
+- 输出：`tool_calls[]` + `reason`，按本轮剩余的累计工具预算截断；多个循环批次合计不得超过 `MAX_TOOL_CALLS_PER_TURN=8`。
 
 ### LLM4 — `llm_responder`（`RESPONDER_PROMPT`, `copilot.py:153`）
 
