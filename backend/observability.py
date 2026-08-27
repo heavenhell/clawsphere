@@ -23,7 +23,7 @@ class _NoopMetric:
 try:
     from prometheus_client import Counter, Histogram
 except ImportError:
-    HTTP_REQUESTS = HTTP_LATENCY = INTENT_COUNT = TOOL_CALLS = TOOL_LATENCY = APPROVAL_DECISIONS = _NoopMetric()
+    HTTP_REQUESTS = HTTP_LATENCY = INTENT_COUNT = TOOL_CALLS = TOOL_LATENCY = APPROVAL_DECISIONS = MCP_CLIENT_EVENTS = _NoopMetric()
 else:
     HTTP_REQUESTS = Counter("clawsphere_http_requests_total", "HTTP requests", ["method", "path", "status"])
     HTTP_LATENCY = Histogram("clawsphere_http_request_duration_seconds", "HTTP request latency", ["path"])
@@ -31,6 +31,11 @@ else:
     TOOL_CALLS = Counter("clawsphere_tool_calls_total", "MCP tool calls", ["tool", "success"])
     TOOL_LATENCY = Histogram("clawsphere_tool_duration_seconds", "MCP tool latency", ["tool"])
     APPROVAL_DECISIONS = Counter("clawsphere_approval_decisions_total", "HITL decisions", ["decision"])
+    MCP_CLIENT_EVENTS = Counter(
+        "clawsphere_mcp_client_events_total",
+        "MCP client connection, catalog, and call events",
+        ["event"],
+    )
 
 
 def create_metrics_app():

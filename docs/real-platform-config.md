@@ -20,9 +20,13 @@
   },
   "mcp": {
     "enabled": true,
+    "agent_mode": "mcp",
     "transport": "streamable-http",
     "host": "127.0.0.1",
-    "port": 8020
+    "port": 8020,
+    "url": "",
+    "connect_timeout_seconds": 5,
+    "call_timeout_seconds": 30
   }
 }
 ```
@@ -60,7 +64,34 @@
 - eDME 默认连接 `https://IP:26335`，调用 `/rest/plat/smapp/v1/sessions` 登录并缓存 `accessSession`。
 - eDME 配置完成后，存储池和数据存储查询优先使用 eDME；未配置时使用 FusionCompute 或 Mock。
 - 任一真实平台启用后，`/mock/*` 路由默认关闭；全部平台留空时自动开启 Mock。
-- MCP 默认监听 `http://127.0.0.1:8020/mcp`，由 `start-demo.ps1` 一起启动。
+- `mcp.enabled=true` 只控制 `start-demo.ps1` 是否启动本机 MCP Server；Agent 连接模式由 `agent_mode` 独立控制。
+- `agent_mode=mcp` 时 Agent 通过持久 MCP Client 动态调用 `tools/list` 和 `tools/call`。`url` 留空时连接 `http://host:port/mcp`。
+- MCP Server 发送 `notifications/tools/list_changed` 后，Agent 会立即在后台刷新已知调用者的目录；执行前若发现目录版本变化，会丢弃旧计划并重新规划一次。重连后也会重新拉取目录。
+- MCP 不可用或刷新失败时不会回退到本地工具，会返回明确错误，并记录结构化错误日志与 `clawsphere_mcp_client_events_total` 指标。告警通知接口已预留，外部通知渠道后续接入。
+- `agent_mode=local` 只允许全部 Provider 都是 Mock 的调试环境；配置任何真实平台后默认切换为 `mcp`，显式配置 `local` 会拒绝启动。
+
+## 远程 MCP Server
+
+Agent 与 MCP Server 可以独立部署。连接远程 Server 时不需要在 Agent 进程启动本地服务：
+
+```json
+{
+  "mcp": {
+    "enabled": false,
+    "agent_mode": "mcp",
+    "transport": "streamable-http",
+    "url": "https://mcp.example.internal/operations/mcp",
+    "connect_timeout_seconds": 5,
+    "call_timeout_seconds": 30
+  }
+}
+```
+
+`url` 必须是绝对 HTTP(S) 地址，不能包含用户名、密码、query 或 fragment。生产环境应使用 HTTPS 和受信任的内部网络/反向代理。
+
+Agent 会在每次 `tools/list`/`tools/call` 请求的 MCP `_meta` 中注入短期签名调用者令牌，包含 `user_id`、`roles`、`tenant_id` 和任务绑定；这些控制字段不出现在模型可见的工具参数 Schema 中。FusionCompute/eDME 等设备凭证仍由 MCP Server 根据其本地平台配置读取，不会传入模型或 Agent 的工具参数。
+
+当前 HITL 审批记录存储在 SQLite。同主机的 Agent 与 MCP Server 可通过相同 `DCS_DATA_DIR` 使用同一数据库；不要把 SQLite 文件放到跨主机网络文件系统。真正跨主机且需要执行写工具时，必须先接入统一审批服务。否则 Server 查不到与 task_id、租户、工具和参数完全匹配的已批准记录，会返回 `APPROVAL_REQUIRED`，不会降级或绕过审批。只读工具不依赖共享审批存储。
 
 可通过 `GET /api/platform-status` 检查每个平台当前是 `real` 还是 `mock`。
 

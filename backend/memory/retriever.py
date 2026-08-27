@@ -150,3 +150,48 @@ def retrieve_tools(query: str, roles: list[str], tenant_id: str = "global", top_
         }
         for index in ranking
     ]
+
+
+def retrieve_discovered_tools(
+    query: str,
+    tools: list[dict[str, Any]],
+    roles: list[str],
+    top_k: int = 5,
+) -> list[dict[str, Any]]:
+    """RBAC-filter and rank an MCP-discovered catalog snapshot.
+
+    Unlike retrieve_tools(), this never consults the process-local registry;
+    the supplied snapshot is the complete source of truth for this search.
+    """
+    candidates = []
+    for tool in tools:
+        auth_roles = tool.get("auth_roles") or []
+        if not any(role in auth_roles for role in roles):
+            continue
+        category = str(tool.get("category") or "general")
+        tags = [str(tag) for tag in (tool.get("tags") or [])]
+        description = str(tool.get("description") or "")
+        name = str(tool.get("name") or "")
+        candidates.append({
+            "tool_name": name,
+            "category": category,
+            "tags": tags,
+            "description": description,
+            "tokens": tokenize(f"{name} {description} {category} {' '.join(tags)}"),
+        })
+    if not candidates:
+        return []
+    bm25 = BM25Okapi([row["tokens"] for row in candidates])
+    scores = bm25.get_scores(tokenize(query))
+    ranking = sorted(range(len(candidates)), key=lambda index: scores[index], reverse=True)[:top_k]
+    return [
+        {
+            "tool_name": candidates[index]["tool_name"],
+            "category": candidates[index]["category"],
+            "tags": candidates[index]["tags"],
+            "description": candidates[index]["description"],
+            "score": round(float(scores[index]), 5),
+            "retrieval_mode": "bm25",
+        }
+        for index in ranking
+    ]

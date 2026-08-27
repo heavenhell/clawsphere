@@ -643,6 +643,7 @@ def test_step_budget_caps_tool_calls_per_turn(monkeypatch):
 def test_production_mode_requires_explicit_secret():
     env = os.environ.copy()
     env["DEMO_MODE"] = "false"
+    env["PYTHON_DOTENV_DISABLED"] = "true"
     env.pop("DCS_JWT_SECRET", None)
     result = subprocess.run(
         [sys.executable, "-c", "import backend.mcp.auth"],

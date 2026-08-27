@@ -3,12 +3,16 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import jwt
 from fastapi import Header, HTTPException
 
 
 JWT_ALGORITHM = "HS256"
+MCP_CALLER_TOKEN_AUDIENCE = "clawsphere-mcp-server"
+MCP_CALLER_TOKEN_ISSUER = "clawsphere-agent"
+MCP_CALLER_TOKEN_META_KEY = "com.clawsphere/caller-token"
 DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
 JWT_SECRET = os.getenv("DCS_JWT_SECRET")
 if not JWT_SECRET:
@@ -55,6 +59,57 @@ def decode_token(token: str) -> AuthContext:
         user_id=str(payload.get("sub") or "unknown"),
         roles=roles,
         tenant_id=str(payload.get("tenant_id") or "default"),
+    )
+
+
+def issue_mcp_caller_token(auth: AuthContext, task_id: str, ttl_seconds: int = 120) -> str:
+    """Issue a short-lived, Agent-only caller envelope for MCP request metadata.
+
+    This token carries ClawSphere caller identity and the server-side approval
+    task binding. Device credentials are deliberately excluded and remain owned
+    by the MCP Server's configured providers.
+    """
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {
+            "sub": auth.user_id,
+            "roles": auth.roles,
+            "tenant_id": auth.tenant_id,
+            "task_id": task_id,
+            "iss": MCP_CALLER_TOKEN_ISSUER,
+            "aud": MCP_CALLER_TOKEN_AUDIENCE,
+            "iat": now,
+            "exp": now + timedelta(seconds=ttl_seconds),
+        },
+        JWT_SECRET,
+        algorithm=JWT_ALGORITHM,
+    )
+
+
+def decode_mcp_caller_token(token: str) -> tuple[AuthContext, str]:
+    try:
+        payload: dict[str, Any] = jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM],
+            audience=MCP_CALLER_TOKEN_AUDIENCE,
+            issuer=MCP_CALLER_TOKEN_ISSUER,
+        )
+    except jwt.PyJWTError as exc:
+        raise PermissionError("无效或已过期的 MCP 调用者令牌") from exc
+    roles = payload.get("roles")
+    if not isinstance(roles, list) or not roles or not set(roles) <= {"readonly", "ops", "admin"}:
+        raise PermissionError("MCP 调用者令牌角色无效")
+    task_id = str(payload.get("task_id") or "")
+    if not 8 <= len(task_id) <= 128:
+        raise PermissionError("MCP 调用者令牌缺少有效 task_id")
+    return (
+        AuthContext(
+            user_id=str(payload.get("sub") or "unknown"),
+            roles=roles,
+            tenant_id=str(payload.get("tenant_id") or "default"),
+        ),
+        task_id,
     )
 
 

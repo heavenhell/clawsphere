@@ -13,8 +13,12 @@
   },
   "mcp": {
     "enabled": true,
+    "agent_mode": "mcp",
     "transport": "streamable-http",
     "host": "127.0.0.1",
-    "port": 8020
+    "port": 8020,
+    "url": "",
+    "connect_timeout_seconds": 5,
+    "call_timeout_seconds": 30
   }
 }

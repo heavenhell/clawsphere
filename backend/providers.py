@@ -104,9 +104,11 @@ class ConfiguredRepository(FusionComputeInterface, DoradoInterface, EDMEInterfac
             "mock_api_exposed": self.config.expose_mock_api,
             "mcp": {
                 "enabled": self.config.mcp.enabled,
+                "agent_mode": self.config.mcp.agent_mode,
                 "transport": self.config.mcp.transport,
                 "host": self.config.mcp.host,
                 "port": self.config.mcp.port,
+                "endpoint": self.config.mcp.endpoint,
             },
             "config_path": str(self.config.source_path),
         }

@@ -38,5 +38,13 @@ Write-Host "DCS Copilot Demo started:"
 Write-Host "Backend:  http://127.0.0.1:8010"
 Write-Host "Frontend: http://127.0.0.1:5174"
 if ($PlatformConfig -and $PlatformConfig.mcp.enabled) {
-  Write-Host "MCP:      http://$($PlatformConfig.mcp.host):$($PlatformConfig.mcp.port)/mcp"
+  Write-Host "MCP Server: http://$($PlatformConfig.mcp.host):$($PlatformConfig.mcp.port)/mcp"
+}
+if ($PlatformConfig -and $PlatformConfig.mcp.agent_mode -eq "mcp") {
+  $McpEndpoint = if ($PlatformConfig.mcp.url) {
+    $PlatformConfig.mcp.url
+  } else {
+    "http://$($PlatformConfig.mcp.host):$($PlatformConfig.mcp.port)/mcp"
+  }
+  Write-Host "Agent MCP:  $McpEndpoint"
 }

@@ -20,6 +20,7 @@ def test_single_config_enables_only_completed_platforms(tmp_path):
     config = load_runtime_config(path)
     assert config.real_platforms == ["fusioncompute"]
     assert not config.expose_mock_api
+    assert config.mcp.agent_mode == "mcp"
     assert config.fusioncompute.base_url(7443) == "https://10.0.0.10:7443"
 
 
@@ -133,3 +134,39 @@ def test_session_only_configuration_fails_clearly_when_session_expires():
     )
     with pytest.raises(RuntimeError, match="session is missing or expired"):
         adapter.edme_resource_instances("SYS_StorageDevice")
+
+
+def test_remote_mcp_endpoint_is_decoupled_from_local_server_start(tmp_path):
+    path = tmp_path / "platforms.json"
+    path.write_text(json.dumps({
+        "mcp": {
+            "enabled": False,
+            "agent_mode": "mcp",
+            "url": "https://mcp.example.test/operations/mcp",
+            "connect_timeout_seconds": 3,
+            "call_timeout_seconds": 20,
+        }
+    }), encoding="utf-8")
+    config = load_runtime_config(path)
+    assert not config.mcp.enabled
+    assert config.mcp.agent_mode == "mcp"
+    assert config.mcp.endpoint == "https://mcp.example.test/operations/mcp"
+
+
+def test_local_agent_mode_is_rejected_for_real_platforms(tmp_path):
+    path = tmp_path / "platforms.json"
+    path.write_text(json.dumps({
+        "fusioncompute": {"ip": "10.0.0.10", "username": "fc-user", "password": "secret"},
+        "mcp": {"agent_mode": "local"},
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="only allowed.*Mock"):
+        load_runtime_config(path)
+
+
+def test_mcp_url_rejects_embedded_credentials(tmp_path):
+    path = tmp_path / "platforms.json"
+    path.write_text(json.dumps({
+        "mcp": {"agent_mode": "mcp", "url": "https://user:secret@mcp.example.test/mcp"},
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="must not contain credentials"):
+        load_runtime_config(path)

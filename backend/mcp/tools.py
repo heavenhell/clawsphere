@@ -41,6 +41,7 @@ from backend.observability import TOOL_CALLS, TOOL_LATENCY
 # Consumed by authorization_epoch() to detect a stale in-flight write across a
 # HITL pause.
 TOOL_CATALOG_VERSION = 1
+TOOL_METADATA_KEY = "com.clawsphere/tool"
 
 
 @dataclass(frozen=True)
@@ -441,6 +442,22 @@ def call_tool(request: ToolRequest) -> ToolResponse:
                         error_msg="高风险工具必须匹配已批准的工具和参数",
                     )
                 else:
+                    # Final server-side safety check. MCP clients may discover
+                    # schemas remotely and therefore must not query providers
+                    # locally just to validate resource existence, blast
+                    # radius, or rate limits. Approval matching intentionally
+                    # remains first so mismatched approved parameters keep the
+                    # stable APPROVAL_REQUIRED response contract.
+                    from backend.guardrails.policy import validate_tool_calls
+
+                    validation = validate_tool_calls(
+                        [{"tool_name": request.tool_name, "params": params}],
+                        request.caller_roles,
+                        task_id=request.task_id,
+                    )
+                    if not validation["allowed"]:
+                        raise ValueError("；".join(validation["violations"]))
+                    params = validation["tool_calls"][0]["params"]
                     tool_response = response(True, data=spec.fn(**params))
             elif request.tool_name == "create_approval_request":
                 from backend.guardrails.policy import validate_tool_calls

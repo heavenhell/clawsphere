@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -56,9 +57,17 @@ class PlatformCredentials:
 @dataclass(frozen=True)
 class McpRuntimeConfig:
     enabled: bool = False
+    agent_mode: str = "local"
     transport: str = "streamable-http"
     host: str = "127.0.0.1"
     port: int = 8020
+    url: str = ""
+    connect_timeout_seconds: float = 5.0
+    call_timeout_seconds: float = 30.0
+
+    @property
+    def endpoint(self) -> str:
+        return self.url.strip() or f"http://{self.host}:{self.port}/mcp"
 
 
 @dataclass(frozen=True)
@@ -100,14 +109,38 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         payload = json.loads(source.read_text(encoding="utf-8"))
     fusioncompute = _credentials(payload.get("fusioncompute"))
     edme = _credentials(payload.get("edme"))
+    real_enabled = fusioncompute.configured or edme.configured
     mcp_data = payload.get("mcp") or {}
+    mcp_enabled = bool(mcp_data.get("enabled", False))
+    agent_mode = str(
+        mcp_data.get("agent_mode") or ("mcp" if (mcp_enabled or real_enabled) else "local")
+    ).lower()
+    if agent_mode not in {"local", "mcp"}:
+        raise ValueError("mcp.agent_mode must be either 'local' or 'mcp'")
     mcp = McpRuntimeConfig(
-        enabled=bool(mcp_data.get("enabled", False)),
+        enabled=mcp_enabled,
+        agent_mode=agent_mode,
         transport=str(mcp_data.get("transport") or "streamable-http"),
         host=str(mcp_data.get("host") or "127.0.0.1"),
         port=int(mcp_data.get("port") or 8020),
+        url=str(mcp_data.get("url") or ""),
+        connect_timeout_seconds=float(mcp_data.get("connect_timeout_seconds") or 5.0),
+        call_timeout_seconds=float(mcp_data.get("call_timeout_seconds") or 30.0),
     )
-    real_enabled = fusioncompute.configured or edme.configured
+    if mcp.connect_timeout_seconds <= 0 or mcp.call_timeout_seconds <= 0:
+        raise ValueError("MCP connect and call timeouts must be positive")
+    if mcp.url:
+        parsed_url = urlparse(mcp.url)
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+            raise ValueError("mcp.url must be an absolute HTTP(S) URL")
+        if parsed_url.username or parsed_url.password:
+            raise ValueError("mcp.url must not contain credentials")
+        if parsed_url.query or parsed_url.fragment:
+            raise ValueError("mcp.url must not contain a query string or fragment")
+    if real_enabled and mcp.agent_mode == "local":
+        raise ValueError("mcp.agent_mode='local' is only allowed when all platform providers use Mock")
+    if mcp.agent_mode == "mcp" and mcp.transport != "streamable-http":
+        raise ValueError("Agent MCP mode currently requires mcp.transport='streamable-http'")
     return RuntimeConfig(
         fusioncompute=fusioncompute,
         edme=edme,

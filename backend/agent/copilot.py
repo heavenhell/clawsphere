@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command, interrupt
+from jsonschema import Draft202012Validator
 
 from backend.agent.llm import (
     DEEPSEEK_MODEL,
@@ -25,15 +26,22 @@ from backend.agent.checkpoint import close_checkpointer, get_checkpointer
 from backend.agent.identity import build_system_prompt, identity_block
 from backend.guardrails.approvals import approval_store
 from backend.guardrails.policy import risk_for_tool, validate_tool_calls
+from backend.mcp.auth import AuthContext
+from backend.mcp.gateway import (
+    ToolCatalogChangedError,
+    ToolGatewayError,
+    close_tool_gateway,
+    get_tool_gateway,
+)
 from backend.mcp.schemas import ToolRequest, ToolSearchRequest
-from backend.mcp.tools import TOOL_CATALOG_VERSION, TOOL_REGISTRY, call_tool, tool_catalog_tier1
+from backend.mcp.tools import TOOL_CATALOG_VERSION, TOOL_REGISTRY, tool_catalog_tier1
 from backend.memory.context_manager import (
     RESOURCE_ID_PATTERN,
     deterministic_summary,
     manage_context_window,
 )
 from backend.memory.database import memory_db
-from backend.memory.retriever import retrieve_history, retrieve_tools
+from backend.memory.retriever import retrieve_discovered_tools, retrieve_history, retrieve_tools
 from backend.memory.store import write_conversation_summary
 from backend.skills.loader import (
     load_skill_by_id,
@@ -80,7 +88,11 @@ class CopilotState(TypedDict, total=False):
     tool_search_request: dict[str, Any]
     tool_search_candidates: list[dict[str, Any]]
     selected_tool_schemas: list[dict[str, Any]]
-    tool_catalog_version: int
+    tool_catalog: list[dict[str, Any]]
+    tool_catalog_source: str
+    tool_catalog_version: str
+    tool_catalog_refresh_count: int
+    tool_catalog_barrier: str
     route_decisions: list[dict[str, Any]]
     authorization_epoch: str
     llm_stage_metrics: list[dict[str, Any]]
@@ -201,6 +213,82 @@ def _rbac_tool_catalog(roles: list[str], names: set[str] | None = None) -> list[
     ]
 
 
+def _state_auth(state: CopilotState) -> AuthContext:
+    return AuthContext(state["user_id"], state["user_roles"], state["tenant_id"])
+
+
+def _discovered_tool_schemas(
+    state: CopilotState,
+    names: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": tool["name"],
+                "description": tool.get("description", ""),
+                "parameters": tool.get("input_schema") or {"type": "object"},
+            },
+        }
+        for tool in state.get("tool_catalog", [])
+        if any(role in (tool.get("auth_roles") or []) for role in state["user_roles"])
+        and (names is None or tool["name"] in names)
+    ]
+
+
+def _tool_risk(state: CopilotState, tool_name: str) -> str:
+    if state.get("tool_catalog_source") == "local":
+        return risk_for_tool(tool_name)
+    tool = next((item for item in state.get("tool_catalog", []) if item.get("name") == tool_name), None)
+    return str((tool or {}).get("risk") or "unknown")
+
+
+def _validate_discovered_tool_calls(
+    state: CopilotState,
+    calls: list[dict[str, Any]],
+    allowed_tool_names: set[str] | None = None,
+) -> dict[str, Any]:
+    """Fail-closed client validation over the exact MCP catalog snapshot.
+
+    The MCP Server remains authoritative for provider/business validation,
+    approval binding, rate limits, RBAC, and audit. The Agent validates only
+    discovered metadata, the offered set, and JSON Schema before HITL.
+    """
+    catalog = {tool["name"]: tool for tool in state.get("tool_catalog", [])}
+    violations: list[str] = []
+    approved: list[dict[str, Any]] = []
+    hitl_required = False
+    for proposed in calls:
+        name = str(proposed.get("tool_name") or "")
+        tool = catalog.get(name)
+        if tool is None:
+            violations.append(f"工具不存在：{name}")
+            continue
+        if not any(role in (tool.get("auth_roles") or []) for role in state["user_roles"]):
+            violations.append(f"{'/'.join(state['user_roles'])} 角色无权调用工具：{name}")
+            continue
+        if allowed_tool_names is not None and name not in allowed_tool_names:
+            violations.append(f"该工具未在本轮检索候选中提供：{name}")
+            continue
+        params = proposed.get("params") or {}
+        errors = sorted(
+            Draft202012Validator(tool.get("input_schema") or {"type": "object"}).iter_errors(params),
+            key=lambda error: list(error.path),
+        )
+        if errors:
+            violations.append(f"参数校验失败：{name} / {errors[0].message}")
+            continue
+        if tool.get("risk") in {"medium", "high"}:
+            hitl_required = True
+        approved.append({**proposed, "params": params})
+    return {
+        "allowed": not violations,
+        "hitl_required": hitl_required,
+        "tool_calls": approved,
+        "violations": violations,
+    }
+
+
 def _llm_history(state: CopilotState, extra_context: str = "") -> list[dict[str, str]]:
     """Compose the chat history handed to the LLM: rolling summary + (optional
     stage-specific extra context, e.g. loaded Skill content) + relevant +
@@ -233,12 +321,20 @@ def _loaded_skills_text(state: CopilotState) -> str:
 
 
 def _skill_router_payload(state: CopilotState) -> str:
+    if state.get("tool_catalog_source") == "local":
+        tier1_catalog = tool_catalog_tier1(state["user_roles"])
+    else:
+        tier1_catalog = "\n".join(
+            f"- {tool['name']} ({tool.get('category', 'general')}): {tool.get('description', '')}"
+            for tool in state.get("tool_catalog", [])
+            if any(role in (tool.get("auth_roles") or []) for role in state["user_roles"])
+        )
     payload = {
         "message": state["message"],
         "conversation_summary": state.get("conversation_summary", "")[:1500],
         "recent_messages": state.get("recent_messages", [])[-6:],
         "skill_catalog": skill_catalog_tier1(state["user_roles"]),
-        "tool_catalog": tool_catalog_tier1(state["user_roles"]),
+        "tool_catalog": tier1_catalog,
     }
     return json.dumps(payload, ensure_ascii=False)
 
@@ -268,14 +364,18 @@ def _call_tool_call_planner(
         return None
 
 
-def authorization_epoch(roles: list[str], tenant_id: str) -> str:
+def authorization_epoch(
+    roles: list[str],
+    tenant_id: str,
+    tool_catalog_version: str | int = TOOL_CATALOG_VERSION,
+) -> str:
     """Fingerprint of "what this turn is allowed to see", fixed at turn start.
 
     Used to detect a stale in-flight write across a HITL pause: if the skill
     or tool catalog version changes while a human is approving, the fingerprint
     no longer matches and the write is rejected instead of executed against a
     catalog it was never actually validated against."""
-    return f"{tenant_id}:{'|'.join(sorted(roles))}:{skill_catalog_version()}:{TOOL_CATALOG_VERSION}"
+    return f"{tenant_id}:{'|'.join(sorted(roles))}:{skill_catalog_version()}:{tool_catalog_version}"
 
 
 def _budget_exhausted(state: CopilotState) -> bool:
@@ -317,6 +417,29 @@ def _route_entry(stage: str, decision: str, reason: str = "", **detail: Any) -> 
 
 
 # --- Context / retrieval (feed the model) ------------------------------------
+
+def tool_catalog_loader(state: CopilotState) -> CopilotState:
+    """Load the exact gateway catalog before any planning stage sees tools."""
+    try:
+        snapshot = get_tool_gateway().catalog(_state_auth(state))
+    except ToolGatewayError as exc:
+        return {
+            "error": str(exc),
+            "final_response": f"请求处理失败：{exc}",
+            "response_source": "mcp_error",
+            "fallback_reason": "mcp_unavailable",
+        }
+    return {
+        "tool_catalog": [tool.model_dump() for tool in snapshot.tools],
+        "tool_catalog_source": snapshot.source,
+        "tool_catalog_version": snapshot.version,
+        "authorization_epoch": authorization_epoch(
+            state["user_roles"],
+            state["tenant_id"],
+            snapshot.version,
+        ),
+        "error": None,
+    }
 
 def context_loader(state: CopilotState) -> CopilotState:
     def summarizer(messages: list[dict[str, str]]) -> str:
@@ -390,24 +513,32 @@ def skill_loader(state: CopilotState) -> CopilotState:
 
 
 def tool_catalog_search(state: CopilotState) -> CopilotState:
-    """RBAC-filter then BM25-rank TOOL_REGISTRY against LLM2's ToolSearch query,
-    then build full function-calling schemas for just the candidate tools.
-    Unauthorized tools are excluded before ranking, not just before execution —
-    they must never become a search candidate, let alone reach LLM3."""
+    """RBAC-filter and rank the current gateway catalog snapshot."""
     request = state.get("tool_search_request") or {}
     query = str(request.get("query") or "")
     top_k = int(request.get("top_k") or 5)
-    candidates = (
-        retrieve_tools(query, state["user_roles"], state["tenant_id"], top_k=top_k)
-        if query.strip()
-        else []
-    )
+    catalog_source = state.get("tool_catalog_source", "local")
+    if query.strip() and catalog_source == "local":
+        candidates = retrieve_tools(query, state["user_roles"], state["tenant_id"], top_k=top_k)
+    elif query.strip():
+        candidates = retrieve_discovered_tools(
+            query,
+            state.get("tool_catalog", []),
+            state["user_roles"],
+            top_k=top_k,
+        )
+    else:
+        candidates = []
     names = {candidate["tool_name"] for candidate in candidates}
-    schemas = _rbac_tool_catalog(state["user_roles"], names=names)
+    schemas = (
+        _rbac_tool_catalog(state["user_roles"], names=names)
+        if catalog_source == "local"
+        else _discovered_tool_schemas(state, names=names)
+    )
     result: dict[str, Any] = {
         "tool_search_candidates": candidates,
         "selected_tool_schemas": schemas,
-        "tool_catalog_version": TOOL_CATALOG_VERSION,
+        "tool_catalog_version": state.get("tool_catalog_version", f"local:{TOOL_CATALOG_VERSION}"),
     }
     if not candidates:
         result["plan_source"] = "tool_search_no_candidates"
@@ -652,19 +783,75 @@ def tool_call_planner(state: CopilotState) -> CopilotState:
     }
 
 
-# --- Safety spine (unchanged): RBAC / risk / rate limit / HITL / execute -----
+# --- Safety spine: catalog barrier / RBAC / risk / HITL / execute ------------
+
+def tool_catalog_barrier(state: CopilotState) -> CopilotState:
+    """Discard and re-plan once if a list_changed refresh replaced the catalog."""
+    try:
+        snapshot = get_tool_gateway().catalog(_state_auth(state))
+    except ToolGatewayError as exc:
+        return {"tool_catalog_barrier": "error", "error": str(exc)}
+    if snapshot.version == state.get("tool_catalog_version"):
+        return {"tool_catalog_barrier": "current"}
+    refresh_count = state.get("tool_catalog_refresh_count", 0)
+    if refresh_count >= 1:
+        return {
+            "tool_catalog_barrier": "error",
+            "tool_calls_proposed": [],
+            "error": "工具目录在本轮规划期间连续变化，已停止执行，请稍后重试",
+        }
+    return {
+        "tool_catalog_barrier": "replan",
+        "tool_catalog": [tool.model_dump() for tool in snapshot.tools],
+        "tool_catalog_source": snapshot.source,
+        "tool_catalog_version": snapshot.version,
+        "tool_catalog_refresh_count": refresh_count + 1,
+        "authorization_epoch": authorization_epoch(
+            state["user_roles"], state["tenant_id"], snapshot.version
+        ),
+        "skill_decision": {},
+        "selected_skill_ids": [],
+        "loaded_skills": [],
+        "tool_search_request": {},
+        "tool_search_candidates": [],
+        "selected_tool_schemas": [],
+        "tool_calls_proposed": [],
+        "error": None,
+        "route_decisions": [
+            *state.get("route_decisions", []),
+            _route_entry("tool_catalog_barrier", "replan", "MCP tools/list_changed refreshed the catalog"),
+        ],
+    }
+
+
+def route_after_tool_catalog_barrier(
+    state: CopilotState,
+) -> Literal["skill_router", "guardrail", "llm_responder"]:
+    if state.get("tool_catalog_barrier") == "replan":
+        return "skill_router"
+    if state.get("error"):
+        return "llm_responder"
+    return "guardrail"
+
 
 def guardrail(state: CopilotState) -> CopilotState:
     allowed_tool_names = {
         schema["function"]["name"] for schema in state.get("selected_tool_schemas", [])
     }
-    result = validate_tool_calls(
-        state.get("tool_calls_proposed", []),
-        state["user_roles"],
-        state["message"],
-        state["task_id"],
-        allowed_tool_names=allowed_tool_names,
-    )
+    if state.get("tool_catalog_source") == "local":
+        result = validate_tool_calls(
+            state.get("tool_calls_proposed", []),
+            state["user_roles"],
+            state["message"],
+            state["task_id"],
+            allowed_tool_names=allowed_tool_names,
+        )
+    else:
+        result = _validate_discovered_tool_calls(
+            state,
+            state.get("tool_calls_proposed", []),
+            allowed_tool_names,
+        )
     if not result["allowed"]:
         return {
             "tool_calls_proposed": [],
@@ -684,7 +871,7 @@ def hitl_interrupt(state: CopilotState) -> CopilotState:
     # before interrupt() idempotent; create_or_get is keyed by task_id for that reason.
     risk_order = {"none": 0, "low": 1, "medium": 2, "high": 3}
     approval_risk = max(
-        (risk_for_tool(call["tool_name"]) for call in state.get("tool_calls_proposed", [])),
+        (_tool_risk(state, call["tool_name"]) for call in state.get("tool_calls_proposed", [])),
         key=lambda risk: risk_order.get(risk, 0),
         default="medium",
     )
@@ -721,36 +908,61 @@ def tool_executor(state: CopilotState) -> CopilotState:
     results = []
     execution_log = []
     calls = state.get("tool_calls_proposed", [])
-    write_calls = [call for call in calls if risk_for_tool(call["tool_name"]) in {"medium", "high"}]
+    try:
+        current_catalog = get_tool_gateway().catalog(_state_auth(state))
+    except ToolGatewayError as exc:
+        return {"tool_results": [], "execution_log": [], "error": str(exc)}
+    if current_catalog.version != state.get("tool_catalog_version"):
+        return {
+            "tool_results": [],
+            "execution_log": [],
+            "error": "执行前复检失败：MCP 工具目录版本已变化，请重新发起请求",
+        }
+    write_calls = [call for call in calls if _tool_risk(state, call["tool_name"]) in {"medium", "high"}]
     if write_calls:
         # Catches a Skill/tool catalog redeploy that happened while a human was
         # approving during hitl_interrupt's pause: the fingerprint fixed at
         # turn start (run_copilot's initial state) is compared against what it
         # would be right now, so a stale write executes against a catalog it
         # was never actually validated against.
-        current_epoch = authorization_epoch(state["user_roles"], state["tenant_id"])
+        current_epoch = authorization_epoch(
+            state["user_roles"], state["tenant_id"], current_catalog.version
+        )
         if current_epoch != state.get("authorization_epoch"):
             return {
                 "tool_results": [],
                 "execution_log": [],
                 "error": "执行前复检失败：技能或工具目录版本已变化，请重新发起请求",
             }
-        recheck = validate_tool_calls(write_calls, state["user_roles"], state["message"], state["task_id"])
+        recheck = (
+            validate_tool_calls(write_calls, state["user_roles"], state["message"], state["task_id"])
+            if state.get("tool_catalog_source") == "local"
+            else _validate_discovered_tool_calls(state, write_calls)
+        )
         if not recheck["allowed"]:
             return {
                 "tool_results": [],
                 "execution_log": [],
                 "error": "执行前复检失败：" + "；".join(recheck["violations"]),
             }
+    gateway = get_tool_gateway()
     for call in calls:
-        response = call_tool(ToolRequest(
+        request = ToolRequest(
             tool_name=call["tool_name"],
             params=call["params"],
             caller_roles=state["user_roles"],
             caller_user_id=state["user_id"],
             tenant_id=state["tenant_id"],
             task_id=state["task_id"],
-        ))
+        )
+        try:
+            response = gateway.call(request, state["tool_catalog_version"])
+        except (ToolCatalogChangedError, ToolGatewayError) as exc:
+            return {
+                "tool_results": results,
+                "execution_log": execution_log,
+                "error": str(exc),
+            }
         result = response.model_dump()
         results.append(result)
         execution_log.append({"tool_name": call["tool_name"], "success": response.success, "audit_id": response.audit_id})
@@ -1015,7 +1227,14 @@ def memory_writer(state: CopilotState) -> CopilotState:
 
 
 def error_handler(state: CopilotState) -> CopilotState:
-    return {"final_response": f"请求处理失败：{state.get('error')}"}
+    return {
+        "final_response": f"请求处理失败：{state.get('error')}",
+        "response_source": "error_handler",
+    }
+
+
+def route_after_catalog_loader(state: CopilotState) -> Literal["context_loader", "error_handler"]:
+    return "error_handler" if state.get("error") else "context_loader"
 
 
 def route_after_guardrail(state: CopilotState) -> Literal["hitl_interrupt", "tool_executor", "llm_responder"]:
@@ -1035,6 +1254,7 @@ def route_after_hitl(state: CopilotState) -> Literal["tool_executor", "llm_respo
 def build_graph():
     builder = StateGraph(CopilotState)
     for name, fn in [
+        ("tool_catalog_loader", tool_catalog_loader),
         ("context_loader", context_loader),
         ("history_retriever", history_retriever),
         ("skill_router", skill_router),
@@ -1042,6 +1262,7 @@ def build_graph():
         ("tool_search_planner", tool_search_planner),
         ("tool_catalog_search", tool_catalog_search),
         ("tool_call_planner", tool_call_planner),
+        ("tool_catalog_barrier", tool_catalog_barrier),
         ("guardrail", guardrail),
         ("hitl_interrupt", hitl_interrupt),
         ("tool_executor", tool_executor),
@@ -1050,18 +1271,21 @@ def build_graph():
         ("error_handler", error_handler),
     ]:
         builder.add_node(name, fn)
-    builder.set_entry_point("context_loader")
+    builder.set_entry_point("tool_catalog_loader")
+    builder.add_conditional_edges("tool_catalog_loader", route_after_catalog_loader)
     builder.add_edge("context_loader", "history_retriever")
     builder.add_edge("history_retriever", "skill_router")
     builder.add_conditional_edges("skill_router", route_after_skill_router)
     builder.add_edge("skill_loader", "tool_search_planner")
     builder.add_conditional_edges("tool_search_planner", route_after_tool_search)
     builder.add_conditional_edges("tool_catalog_search", route_after_tool_catalog_search)
-    builder.add_edge("tool_call_planner", "guardrail")
+    builder.add_edge("tool_call_planner", "tool_catalog_barrier")
+    builder.add_conditional_edges("tool_catalog_barrier", route_after_tool_catalog_barrier)
     builder.add_conditional_edges("guardrail", route_after_guardrail)
     builder.add_conditional_edges("hitl_interrupt", route_after_hitl)
     builder.add_edge("tool_executor", "llm_responder")
     builder.add_edge("llm_responder", "memory_writer")
+    builder.add_edge("error_handler", "memory_writer")
     builder.add_edge("memory_writer", END)
     return builder.compile(checkpointer=get_checkpointer())
 
@@ -1094,6 +1318,7 @@ def close_graph_runtime() -> None:
     global _graph
     _graph = None
     close_checkpointer()
+    close_tool_gateway()
 
 
 def _format_result(state: dict[str, Any], conversation_id: str) -> dict[str, Any]:
@@ -1190,9 +1415,13 @@ def run_copilot(
             "tool_search_request": {},
             "tool_search_candidates": [],
             "selected_tool_schemas": [],
-            "tool_catalog_version": TOOL_CATALOG_VERSION,
+            "tool_catalog": [],
+            "tool_catalog_source": "pending",
+            "tool_catalog_version": "pending",
+            "tool_catalog_refresh_count": 0,
+            "tool_catalog_barrier": "pending",
             "route_decisions": [],
-            "authorization_epoch": authorization_epoch(roles or ["readonly"], tenant_id),
+            "authorization_epoch": "",
             "llm_stage_metrics": [],
             "agent_step_count": 0,
             "tool_calls_proposed": [],
