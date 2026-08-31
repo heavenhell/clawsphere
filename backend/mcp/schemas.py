@@ -19,11 +19,11 @@ class AlarmListParams(ToolParams):
 
 
 class AlarmDetailParams(ToolParams):
-    alarm_id: str = Field(pattern=r"^alarm-\d+$")
+    alarm_id: str = Field(min_length=1, max_length=128)
 
 
 class ClusterCapacityParams(ToolParams):
-    cluster_id: str = Field(pattern=r"^cluster-\d+$")
+    cluster_id: str = Field(min_length=1, max_length=256)
 
 
 class VmListParams(ToolParams):
@@ -44,7 +44,7 @@ class ForecastParams(ClusterCapacityParams):
 
 
 class StoragePoolParams(ToolParams):
-    pool_id: str | None = Field(default=None, pattern=r"^ds-\d+$")
+    pool_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class EdmeAlarmParams(ToolParams):

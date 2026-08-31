@@ -164,12 +164,20 @@ def get_cluster_capacity(cluster_id: str):
     datastores = [ds for ds in repo.datastores() if ds.get("cluster_id") == cluster_id]
     total = sum(ds.get("capacity_gb", 0) for ds in datastores)
     free = sum(ds.get("free_gb", 0) for ds in datastores)
+    used_ratio = round(1 - free / total, 3) if total else 0
+    if total and free / total < 0.15:
+        risk_level = "high"
+    elif total and free / total < 0.3:
+        risk_level = "medium"
+    else:
+        risk_level = "low"
     return {
         "cluster": cluster,
         "datastore_capacity_gb": total,
         "datastore_free_gb": free,
-        "datastore_used_ratio": round(1 - free / total, 3) if total else 0,
-        "risk_level": "high" if free / total < 0.15 else "medium" if free / total < 0.3 else "low",
+        "datastore_used_ratio": used_ratio,
+        "risk_level": risk_level,
+        "matched_datastores": len(datastores),
     }
 
 

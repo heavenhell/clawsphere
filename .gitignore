@@ -15,3 +15,6 @@ eval/report.json
 /_diag.py
 /_test_req.json
 /proxysg_ca.pem
+
+# Site-exported CA bundles are local trust material, not source.
+/config/*.pem

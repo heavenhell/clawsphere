@@ -28,6 +28,34 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 DEEPSEEK_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/chat/completions")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 MAX_LLM_PAYLOAD_BYTES = MAX_REQUEST_BYTES
+_TRUTHY = {"1", "true", "yes", "on"}
+_FALSEY = {"0", "false", "no", "off"}
+
+
+def env_flag(name: str, default: bool) -> bool:
+    """Read a boolean env var. Anything unrecognized keeps the default, so a
+    typo can never silently flip a security-relevant switch to the unsafe side."""
+    raw = (os.getenv(name) or "").strip().lower()
+    if raw in _TRUTHY:
+        return True
+    if raw in _FALSEY:
+        return False
+    return default
+
+
+# HTTP(S) proxy for outbound LLM calls. Behavior is fully explicit:
+#   DEEPSEEK_PROXY_ENABLED=true  + DEEPSEEK_PROXY set  -> route through proxy
+#   DEEPSEEK_PROXY_ENABLED=false (default)              -> direct connect
+# An explicit enable switch keeps behavior deterministic across machines and
+# avoids silently inheriting system-wide proxy env vars.
+DEEPSEEK_PROXY_ENABLED = env_flag("DEEPSEEK_PROXY_ENABLED", False)
+DEEPSEEK_PROXY = os.getenv("DEEPSEEK_PROXY") or None
+# Certificate verification for the outbound LLM call. Defaults to ON: the
+# request carries the API key, so an unverified TLS session is a credential
+# disclosure risk. Only a corporate proxy that terminates TLS with a
+# self-signed certificate justifies DEEPSEEK_VERIFY_SSL=false, and that has to
+# be an explicit, per-machine decision — never the default.
+DEEPSEEK_VERIFY_SSL = env_flag("DEEPSEEK_VERIFY_SSL", True)
 
 _status_lock = threading.Lock()
 _request_status: ContextVar[dict[str, Any] | None] = ContextVar(
@@ -313,7 +341,10 @@ def _invoke(payload: dict[str, Any]) -> dict[str, Any] | None:
     last_error: Exception | None = None
     for attempt in range(3):
         try:
-            with httpx.Client(timeout=timeout) as client:
+            client_kwargs: dict[str, Any] = {"timeout": timeout, "verify": DEEPSEEK_VERIFY_SSL}
+            if DEEPSEEK_PROXY_ENABLED and DEEPSEEK_PROXY:
+                client_kwargs["proxy"] = DEEPSEEK_PROXY
+            with httpx.Client(**client_kwargs) as client:
                 response = client.post(
                     DEEPSEEK_URL,
                     headers={

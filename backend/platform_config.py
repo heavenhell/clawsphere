@@ -22,6 +22,7 @@ class PlatformCredentials:
     ca_cert: str | None = None
     site_id: str | None = None
     api_version: str | None = None
+    verify_ssl: bool | None = None
 
     @property
     def configured(self) -> bool:
@@ -51,6 +52,8 @@ class PlatformCredentials:
 
     @property
     def verify(self) -> bool | str:
+        if self.verify_ssl is False:
+            return False
         return self.ca_cert or True
 
 
@@ -99,6 +102,7 @@ def _credentials(payload: dict[str, Any] | None) -> PlatformCredentials:
         ca_cert=str(data["ca_cert"]) if data.get("ca_cert") else None,
         site_id=str(data["site_id"]) if data.get("site_id") else None,
         api_version=str(data["api_version"]) if data.get("api_version") else None,
+        verify_ssl=bool(data["verify_ssl"]) if data.get("verify_ssl") is not None else None,
     )
 
 
