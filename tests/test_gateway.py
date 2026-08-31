@@ -137,7 +137,7 @@ def test_an_id_buried_in_a_tool_text_field_still_grounds():
         [{"tool_name": "list_alarms", "success": True, "data": [{
             "id": "alarm-9003",
             "name": "虚拟机内存不足",
-            "moi": "对象类型=虚拟机, 虚拟机ID=vm-1001, 主机URN=urn:sites:3F0A:hosts:178",
+            "moi": "对象类型=虚拟机, 虚拟机ID=vm-1001, 主机URN=urn:sites:DEMO:hosts:178",
         }]}],
     )
     assert grounded

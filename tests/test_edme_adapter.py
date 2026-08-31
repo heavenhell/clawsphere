@@ -5,6 +5,14 @@ usage, `;`-joined host IPs, capacity in MB, alarm MOI as a comma-separated
 Chinese key=value string, indicators as a bare `indicator_ids` array — because
 every normalization bug this adapter can have is a bug about *that* shape, not
 about a tidy invented one.
+
+The *shapes* are real; the *values* must never be. Addresses come from the
+RFC 5737 documentation ranges (192.0.2.0/24, 198.51.100.0/24) and every name,
+serial and URN is a made-up placeholder. Never seed a fixture from a live
+platform response or a runtime log: this repository is public, and a management
+IP or hostname copied out of an ops log is reconnaissance material even though
+it is not a credential. `test_no_real_environment_data.py` enforces the part of
+this that a machine can check.
 """
 
 from __future__ import annotations
@@ -23,42 +31,42 @@ from backend.providers import ConfiguredRepository
 # --- Real response fixtures --------------------------------------------------
 
 SITES = {"sites": [{
-    "id": "urn:sites:3F0A", "name": "site-license", "version": "8.6.1",
+    "id": "urn:sites:DEMO", "name": "site-demo", "version": "8.6.1",
     "cpu_usage": 41, "memory_usage": 63, "host_num": 6, "vm_num": 58,
-    "cluster_num": 2, "ip_address": "51.36.194.190",
+    "cluster_num": 2, "ip_address": "192.0.2.10",
 }]}
 
 CLUSTERS = {"clusters": [
     {
-        "id": "urn:sites:3F0A:clusters:11", "name": "ManageCluster",
+        "id": "urn:sites:DEMO:clusters:11", "name": "ManageCluster",
         "cpu_usage": 38, "memory_usage": 55, "host_num": 2, "vm_num": 22,
-        "datastore_num": 3, "site_id": "urn:sites:3F0A", "vr_type": "CNA",
+        "datastore_num": 3, "site_id": "urn:sites:DEMO", "vr_type": "CNA",
     },
     {
-        "id": "urn:sites:3F0A:clusters:12", "name": "ServiceCluster",
+        "id": "urn:sites:DEMO:clusters:12", "name": "ServiceCluster",
         "cpu_usage": 72, "memory_usage": 81, "host_num": 4, "vm_num": 36,
-        "datastore_num": 5, "site_id": "urn:sites:3F0A", "vr_type": "CNA",
+        "datastore_num": 5, "site_id": "urn:sites:DEMO", "vr_type": "CNA",
     },
 ]}
 
 HOSTS = {"hosts": [{
-    "id": "urn:sites:3F0A:hosts:178", "name": "CNA-01",
-    "cluster_id": "urn:sites:3F0A:clusters:11", "cluster_name": "ManageCluster",
+    "id": "urn:sites:DEMO:hosts:178", "name": "HOST-01",
+    "cluster_id": "urn:sites:DEMO:clusters:11", "cluster_name": "ManageCluster",
     # The platform joins management and service IPs with a semicolon.
-    "ip_address": "51.36.194.191;192.168.10.11",
+    "ip_address": "192.0.2.11;198.51.100.11",
     "status": "NORMAL", "cpu_usage": 58, "memory_usage": 77, "vm_num": 12,
-    "sn": "2102351NRW10K9000012",
+    "sn": "SN-DEMO-0000000001",
 }]}
 
 
 def _vm(identifier: str, name: str, cluster: str, status: str = "running") -> dict:
     return {
         "id": identifier, "name": name, "status": status,
-        "host_id": "urn:sites:3F0A:hosts:178", "host_name": "CNA-01",
+        "host_id": "urn:sites:DEMO:hosts:178", "host_name": "HOST-01",
         "cluster_id": cluster, "cluster_name": "ManageCluster",
         # cpu/memory arrive as nested objects, not scalars.
         "cpu": {"quantity": 4}, "memory": {"quantity_size": 8192},
-        "ip_address": "192.168.10.51", "is_template": False, "disk_num": 2,
+        "ip_address": "198.51.100.51", "is_template": False, "disk_num": 2,
     }
 
 
@@ -66,7 +74,7 @@ ALARMS = {"resCode": 1, "iterator": None, "hits": [
     {
         "alarmId": "0x8100302", "alarmName": "主机CPU使用率超过阈值", "severity": 2,
         "cleared": 0, "meName": "VRM",
-        "moi": "对象类型=主机, 对象名称=CNA-01, 站点IP=51.36.194.190, 主机URN=urn:sites:3F0A:hosts:178",
+        "moi": "对象类型=主机, 对象名称=HOST-01, 站点IP=192.0.2.10, 主机URN=urn:sites:DEMO:hosts:178",
         "firstOccurUtc": 1783792800000, "latestOccurUtc": 1783793700000,
         "additionalInformation": "CPU 使用率 91%，持续 15 分钟",
     },
@@ -74,20 +82,20 @@ ALARMS = {"resCode": 1, "iterator": None, "hits": [
         # No 对象名称, so the URN is what identifies the object.
         "alarmId": "0x8100411", "alarmName": "虚拟机内存不足", "severity": 1,
         "cleared": 0, "meName": "VRM",
-        "moi": "对象类型=虚拟机, 虚拟机URN=urn:sites:3F0A:vms:2049",
+        "moi": "对象类型=虚拟机, 虚拟机URN=urn:sites:DEMO:vms:2049",
         "firstOccurUtc": 1783793100000, "latestOccurUtc": 1783794000000,
     },
     {
         # Storage alarms arrive with no MOI at all; meName is the only clue.
         "alarmId": "0x2003001", "alarmName": "Storage pool capacity exceeded", "severity": 3,
-        "cleared": 1, "meName": "SNS-Dorado-01", "moi": "",
+        "cleared": 1, "meName": "storage-demo-01", "moi": "",
         "firstOccurUtc": 1783790000000, "latestOccurUtc": 0,
     },
 ]}
 
 STORAGE_POOLS = {"datas": [{
-    "id": "0", "name": "StoragePool001", "storage_id": "SNS3-Dorado",
-    "storage_name": "Dorado-01", "health_status": "NORMAL", "running_status": "Online",
+    "id": "0", "name": "pool-demo-001", "storage_id": "storage-demo-1",
+    "storage_name": "storage-demo-01", "health_status": "NORMAL", "running_status": "Online",
     # Capacity is reported in MB.
     "total_capacity": 26214400, "free_capacity": 19267584, "consumed_capacity": 6946816,
     "usage_type": "BLOCK", "disk_types": ["SSD"], "raid_level": ["RAID5"],
@@ -149,7 +157,7 @@ def test_percent_usage_and_joined_ips_are_normalized():
     assert site["vm_count"] == 58
     assert host["memory_usage"] == 0.77
     # Only the management IP is useful; the service IP must not ride along.
-    assert host["management_ip"] == "51.36.194.191"
+    assert host["management_ip"] == "192.0.2.11"
     assert host["status"] == "normal"
 
 
@@ -176,10 +184,10 @@ def test_unfiltered_vm_listing_fans_out_across_clusters():
     "多少台 VM" with whatever fit on the first page.
     """
     per_cluster = {
-        "urn:sites:3F0A:clusters:11": [_vm("urn:vms:1", "vm-a", "urn:sites:3F0A:clusters:11")],
-        "urn:sites:3F0A:clusters:12": [
-            _vm("urn:vms:2", "vm-b", "urn:sites:3F0A:clusters:12"),
-            _vm("urn:vms:3", "vm-c", "urn:sites:3F0A:clusters:12"),
+        "urn:sites:DEMO:clusters:11": [_vm("urn:vms:1", "vm-a", "urn:sites:DEMO:clusters:11")],
+        "urn:sites:DEMO:clusters:12": [
+            _vm("urn:vms:2", "vm-b", "urn:sites:DEMO:clusters:12"),
+            _vm("urn:vms:3", "vm-c", "urn:sites:DEMO:clusters:12"),
         ],
     }
 
@@ -247,10 +255,10 @@ def test_alarm_moi_yields_object_type_and_id():
     alarms = adapter.virtual_alarms()
     host_alarm, vm_alarm, storage_alarm = alarms
 
-    assert (host_alarm["object_type"], host_alarm["object_id"]) == ("host", "CNA-01")
+    assert (host_alarm["object_type"], host_alarm["object_id"]) == ("host", "HOST-01")
     # With no 对象名称 present the URN carries the identity.
     assert vm_alarm["object_type"] == "vm"
-    assert vm_alarm["object_id"] == "urn:sites:3F0A:vms:2049"
+    assert vm_alarm["object_id"] == "urn:sites:DEMO:vms:2049"
     # No MOI at all: meName is the only signal left.
     assert storage_alarm["object_type"] == "storage"
 
@@ -287,7 +295,7 @@ def test_storage_capacity_is_converted_from_mb_to_gb():
     # Reporting MB as GB would overstate free space by 1024x and silence every
     # capacity risk check downstream.
     assert datastore["capacity_gb"] == 25600.0
-    assert datastore["cluster_id"] == "SNS3-Dorado"
+    assert datastore["cluster_id"] == "storage-demo-1"
     assert datastore["status"] == "normal"
 
 
@@ -310,15 +318,15 @@ def test_history_falls_back_to_storage_ids_when_resourcedb_is_denied():
             # the token is fine, so re-login cannot fix it.
             return httpx.Response(403, json={"error": "no permission"})
         if request.url.path.endswith("/history-data/action/query"):
-            return httpx.Response(200, json={"history": [{"obj_id": "SNS3-Dorado", "value": 42}]})
+            return httpx.Response(200, json={"history": [{"obj_id": "storage-demo-1", "value": 42}]})
         return _routes(request)
 
     adapter, seen = _adapter(handler)
     history = adapter.edme_history()
 
-    assert history == [{"obj_id": "SNS3-Dorado", "value": 42}]
+    assert history == [{"obj_id": "storage-demo-1", "value": 42}]
     body = json.loads([r for r in seen if r.url.path.endswith("/action/query")][-1].content)
-    assert body["obj_ids"] == ["SNS3-Dorado"]
+    assert body["obj_ids"] == ["storage-demo-1"]
     assert body["obj_type_id"] == 1001
 
 
@@ -346,7 +354,7 @@ def test_metrics_refuse_to_serve_mock_data_when_only_edme_is_configured(tmp_path
     with pytest.raises(ValueError, match="FusionCompute"):
         repository.vm_metrics("urn:vms:1")
     with pytest.raises(ValueError, match="FusionCompute"):
-        repository.cluster_daily_growth_gb("urn:sites:3F0A:clusters:11")
+        repository.cluster_daily_growth_gb("urn:sites:DEMO:clusters:11")
 
 
 def test_overview_counts_come_from_the_platform_not_from_a_short_listing(tmp_path):

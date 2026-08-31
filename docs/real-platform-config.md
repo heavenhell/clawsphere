@@ -7,13 +7,13 @@
 ```json
 {
   "fusioncompute": {
-    "ip": "192.168.10.20",
+    "ip": "192.0.2.20",
     "username": "northbound-user",
     "password": "replace-me",
     "session": ""
   },
   "edme": {
-    "ip": "192.168.10.30",
+    "ip": "192.0.2.30",
     "username": "northbound-user",
     "password": "replace-me",
     "session": ""
@@ -38,13 +38,13 @@
 ```json
 {
   "fusioncompute": {
-    "ip": "192.168.10.20",
+    "ip": "192.0.2.20",
     "username": "",
     "password": "",
     "session": "FusionCompute-X-Auth-Token"
   },
   "edme": {
-    "ip": "192.168.10.30",
+    "ip": "192.0.2.30",
     "username": "",
     "password": "",
     "session": "eDME-accessSession"
@@ -102,7 +102,7 @@ Agent 会在每次 `tools/list`/`tools/call` 请求的 MCP `_meta` 中注入短�
 ```json
 {
   "fusioncompute": {
-    "ip": "192.168.10.20",
+    "ip": "192.0.2.20",
     "username": "northbound-user",
     "password": "replace-me",
     "port": 7443,
@@ -111,7 +111,7 @@ Agent 会在每次 `tools/list`/`tools/call` 请求的 MCP `_meta` 中注入短�
     "ca_cert": "C:\\certs\\fusioncompute-ca.pem"
   },
   "edme": {
-    "ip": "192.168.10.30",
+    "ip": "192.0.2.30",
     "username": "northbound-user",
     "password": "replace-me",
     "port": 26335,

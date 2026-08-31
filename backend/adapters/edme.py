@@ -425,7 +425,7 @@ class EDMERestAdapter(EDMEInterface, DoradoInterface):
     def _parse_moi(cls, moi: str, me_name: str = "") -> tuple[str, str]:
         """Extract object type and object id from eDME MOI text, with meName fallback.
 
-        Example: "对象类型=主机, 对象名称=CNA-01, 站点IP=..., 主机URN=urn:...:hosts:178"
+        Example: "对象类型=主机, 对象名称=HOST-01, 站点IP=..., 主机URN=urn:...:hosts:178"
         """
         obj_type = "unknown"
         obj_id = ""

@@ -456,7 +456,7 @@ def _edme_alarm(index: int, severity_code: int) -> dict:
         "severity_code": severity_code,
         "name": "主机CPU使用率超过阈值",
         "object_type": "host",
-        "object_id": f"urn:sites:3F0A:hosts:{index}",
+        "object_id": f"urn:sites:DEMO:hosts:{index}",
         "status": "active",
         "additional_information": "CPU 使用率持续超过阈值 " * 10,
     }
