@@ -8,8 +8,14 @@ from mcp.server.lowlevel.server import NotificationOptions
 
 from backend.mcp.schemas import ToolRequest
 from backend.mcp.tools import TOOL_METADATA_KEY, TOOL_REGISTRY, call_tool
-from backend.mcp.auth import MCP_CALLER_TOKEN_META_KEY, decode_mcp_caller_token, get_mcp_auth_context
-from backend.providers import runtime_config
+from backend.mcp.auth import (
+    MCP_CALLER_TOKEN_META_KEY,
+    MCP_PLATFORM_CREDENTIAL_HEADER,
+    decode_mcp_caller_token,
+    decode_platform_delegation_token,
+    get_mcp_auth_context,
+)
+from backend.providers import delegated_edme_repository, runtime_config, use_repository
 
 
 mcp = FastMCP(
@@ -51,6 +57,18 @@ def _auth_from_context(ctx: Context) -> tuple[Any, str]:
     return decode_mcp_caller_token(token)
 
 
+def _platform_delegation_from_context(ctx: Context, auth: Any):
+    request = ctx.request_context.request
+    token = request.headers.get(MCP_PLATFORM_CREDENTIAL_HEADER) if request else None
+    if not token:
+        if runtime_config.edme.client_delegated:
+            raise PermissionError("MCP 请求缺少 eDME 平台委托凭证")
+        return None
+    if not runtime_config.edme.client_delegated:
+        raise PermissionError("MCP Server 未启用客户端平台委托鉴权")
+    return decode_platform_delegation_token(token, auth)
+
+
 def _call(
     name: str,
     arguments: dict[str, Any],
@@ -63,18 +81,30 @@ def _call(
         # and therefore requires the per-request signed caller token.
         auth = get_mcp_auth_context()
         effective_task_id = task_id or str(uuid4())
+        if runtime_config.edme.client_delegated:
+            raise PermissionError("eDME 客户端委托模式不允许绕过 MCP Header 直接调用")
     else:
         auth, effective_task_id = _auth_from_context(ctx)
         if task_id is not None and task_id != effective_task_id:
             raise PermissionError("MCP task_id 与调用者令牌不匹配")
-    response = call_tool(ToolRequest(
+    request = ToolRequest(
         tool_name=name,
         params=arguments,
         caller_user_id=auth.user_id,
         caller_roles=auth.roles,
         tenant_id=auth.tenant_id,
         task_id=effective_task_id,
-    ))
+    )
+    delegation = _platform_delegation_from_context(ctx, auth) if ctx is not None else None
+    if delegation is None:
+        response = call_tool(request)
+    else:
+        repository = delegated_edme_repository(delegation.access_session)
+        try:
+            with use_repository(repository):
+                response = call_tool(request)
+        finally:
+            repository.close()
     return response.model_dump(mode="json")
 
 

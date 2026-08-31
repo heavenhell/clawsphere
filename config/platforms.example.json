@@ -6,10 +6,11 @@
     "session": ""
   },
   "edme": {
+    "auth_mode": "client",
+    "single_tenant_bootstrap": true,
     "ip": "",
     "username": "",
-    "password": "",
-    "session": ""
+    "password": ""
   },
   "mcp": {
     "enabled": true,

@@ -274,3 +274,28 @@ def test_chat_rate_limit_returns_429_before_agent_execution(monkeypatch):
         json={"message": "查询资源"},
     )
     assert response.status_code == 429
+
+
+def test_a_metric_value_cannot_ground_a_claim_about_a_resource():
+    """Numeric ids must be groundable; numeric measurements must not be.
+
+    eDME returns `host_id: 178` unquoted, so numbers have to count as evidence —
+    but only from a field that names an identifier. Otherwise any metric value
+    in the payload (memory_mb: 8192) would satisfy a state assertion about a
+    resource called "8192".
+    """
+    tool_results = [{
+        "tool_name": "list_hosts", "success": True,
+        "data": [{"host_id": 178, "memory_mb": 8192, "cpu_usage": 0.58}],
+    }]
+
+    grounded, _ = verify_resource_claims(
+        "该主机负载偏高。", [{"id": "178", "kind": "state_assertion"}], tool_results
+    )
+    assert grounded
+
+    grounded, reason = verify_resource_claims(
+        "该主机负载偏高。", [{"id": "8192", "kind": "state_assertion"}], tool_results
+    )
+    assert not grounded
+    assert "8192" in reason

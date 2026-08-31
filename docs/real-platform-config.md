@@ -2,7 +2,9 @@
 
 运行时只读取 `config/platforms.json`。该文件已加入 `.gitignore`，不会提交平台密码。
 
-默认内容如下。可填写 `ip + username + password`，也可填写 `ip + session`；留空的平台继续使用 Mock：
+默认推荐 eDME 使用客户端委托鉴权：业务凭证由 Agent 在运行时换成 session，签名后随每个请求下发给 MCP Server，MCP Server 自身不保存任何平台凭证。
+
+Agent 目前还没有用户登录，只有一个租户，所以把这个唯一租户的账号密码写在配置里并打开 `single_tenant_bootstrap`。委托链本身不随租户数量变化，将来接入登录后改变的只是凭证来源。FusionCompute 仍使用服务端凭证方式；留空的平台继续使用 Mock：
 
 ```json
 {
@@ -13,10 +15,11 @@
     "session": ""
   },
   "edme": {
+    "auth_mode": "client",
+    "single_tenant_bootstrap": true,
     "ip": "192.0.2.30",
     "username": "northbound-user",
-    "password": "replace-me",
-    "session": ""
+    "password": "replace-me"
   },
   "mcp": {
     "enabled": true,
@@ -30,6 +33,33 @@
   }
 }
 ```
+
+## eDME 客户端委托方式（推荐）
+
+### 凭证来源
+
+委托链与租户数量无关，区别只在这一个 session 从哪来：
+
+- **单租户引导（当前）**：`single_tenant_bootstrap: true` 配合 `username` / `password`。首次请求时 Agent 用它换取 `accessSession` 注册进内存 broker，之后与按人登录完全同路——同样按身份隔离、同样签名下发、MCP Server 同样不保存凭证。这个开关必须显式打开：只写 `auth_mode: "client"` 却填了凭证会直接拒绝启动，避免在以为按人隔离的前提下悄悄共用一个账号。
+- **按人登录（接入用户登录之后）**：配置里不放任何凭证，只留 `ip`，由每个用户各自调用 `POST /api/platform-sessions/edme`。同一身份一旦这样登录过就以它为准，不再使用引导凭证，因此两种来源可以并存过渡。
+
+引导凭证只接受账号密码，不接受预先取好的 `session`：broker 需要能在过期后自行重新登录，写死的 session 失效后没有恢复路径。
+
+单租户引导阶段，eDME 侧的审计和 RBAC 看到的仍然是同一个账号，追不到具体的人；这一层要等按人登录接入后才成立。`DELETE /api/platform-sessions/edme` 在引导模式下只清掉当前 session，下一次请求会重新引导。
+
+### 按人登录流程
+
+用户登录 Agent 后调用 `POST /api/platform-sessions/edme`，请求体仅包含 `username` 和 `password`。Agent 立即通过配置中的固定 eDME 地址交换 `accessSession`，随后丢弃密码；响应只返回连接状态、session 标识和过期时间，不返回 `accessSession`。
+
+Agent 在内存中按 `user_id + tenant_id + platform_id` 隔离 session，并为每个身份建立独立 MCP 连接。session 被封装为签名委托 JWT 放入 `X-ClawSphere-Platform-Credential` Header；MCP Server 校验签名及用户、租户绑定后，才把其中的 `accessSession` 用作下游 `X-Auth-Token`。模型、工具参数、审计和日志都不会看到账号、密码或 session。
+
+可用接口：
+
+- `POST /api/platform-sessions/edme`：登录并替换当前用户的 eDME session。
+- `GET /api/platform-sessions/edme`：查询当前用户连接状态；配置了引导凭证时在这里完成首次换票，登录失败不抛异常，而是在 `error` 字段里说明原因。
+- `DELETE /api/platform-sessions/edme`：从 Agent 内存注销当前用户 session。
+
+生产环境必须在 Agent 和 MCP Server 同时配置相同且独立的 `DCS_MCP_DELEGATION_SECRET`（至少 32 字符）。委托 JWT 是签名而非消息级加密，因此远程 MCP 地址和 eDME 登录地址都强制使用 HTTPS；只有 `127.0.0.1`、`localhost` 和 `::1` 允许 HTTP。反向代理和网关访问日志必须对 `X-ClawSphere-Platform-Credential` Header 做删除或脱敏。
 
 ## Session 方式
 
@@ -89,11 +119,11 @@ Agent 与 MCP Server 可以独立部署。连接远程 Server 时不需要在 Ag
 
 `url` 必须是绝对 HTTP(S) 地址，不能包含用户名、密码、query 或 fragment。生产环境应使用 HTTPS 和受信任的内部网络/反向代理。
 
-Agent 会在每次 `tools/list`/`tools/call` 请求的 MCP `_meta` 中注入短期签名调用者令牌，包含 `user_id`、`roles`、`tenant_id` 和任务绑定；这些控制字段不出现在模型可见的工具参数 Schema 中。FusionCompute/eDME 等设备凭证仍由 MCP Server 根据其本地平台配置读取，不会传入模型或 Agent 的工具参数。
+Agent 会在每次 `tools/list`/`tools/call` 请求的 MCP `_meta` 中注入短期签名调用者令牌，包含 `user_id`、`roles`、`tenant_id` 和任务绑定；这些控制字段不出现在模型可见的工具参数 Schema 中。使用 eDME `auth_mode=client` 时，MCP Server 不保存用户凭证列表，只接收与该调用者绑定的短期 Header 委托令牌。
 
 当前 HITL 审批记录存储在 SQLite。同主机的 Agent 与 MCP Server 可通过相同 `DCS_DATA_DIR` 使用同一数据库；不要把 SQLite 文件放到跨主机网络文件系统。真正跨主机且需要执行写工具时，必须先接入统一审批服务。否则 Server 查不到与 task_id、租户、工具和参数完全匹配的已批准记录，会返回 `APPROVAL_REQUIRED`，不会降级或绕过审批。只读工具不依赖共享审批存储。
 
-可通过 `GET /api/platform-status` 检查每个平台当前是 `real` 还是 `mock`。
+可通过 `GET /api/platform-status` 检查每个平台当前是 `real`、`client-delegated` 还是 `mock`。
 
 ## 可选项
 

@@ -10,6 +10,7 @@ from contextlib import AsyncExitStack
 from dataclasses import asdict, dataclass
 from datetime import timedelta
 from typing import Any, Callable, Protocol
+from urllib.parse import urlparse
 
 import httpx
 import mcp.types as mcp_types
@@ -17,11 +18,17 @@ from anyio.from_thread import BlockingPortal, start_blocking_portal
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-from backend.mcp.auth import AuthContext, MCP_CALLER_TOKEN_META_KEY, issue_mcp_caller_token
+from backend.mcp.auth import (
+    AuthContext,
+    MCP_CALLER_TOKEN_META_KEY,
+    MCP_PLATFORM_CREDENTIAL_HEADER,
+    issue_mcp_caller_token,
+)
 from backend.mcp.schemas import ToolRequest, ToolResponse
 from backend.mcp.tools import TOOL_CATALOG_VERSION, TOOL_METADATA_KEY, TOOL_REGISTRY, call_tool
 from backend.observability import MCP_CLIENT_EVENTS
 from backend.providers import runtime_config
+from backend.platform_sessions import PlatformSessionBroker, platform_session_broker
 
 
 LOGGER = logging.getLogger(__name__)
@@ -175,10 +182,12 @@ class McpToolGateway:
         url: str,
         connect_timeout_seconds: float = 5.0,
         call_timeout_seconds: float = 30.0,
+        default_headers: dict[str, str] | None = None,
     ) -> None:
         self.url = url
         self.connect_timeout_seconds = connect_timeout_seconds
         self.call_timeout_seconds = call_timeout_seconds
+        self.default_headers = dict(default_headers or {})
         self._lifecycle_lock = threading.RLock()
         self._portal_cm: Any | None = None
         self._portal: BlockingPortal | None = None
@@ -244,7 +253,9 @@ class McpToolGateway:
                 self.call_timeout_seconds,
                 connect=self.connect_timeout_seconds,
             )
-            client = await stack.enter_async_context(httpx.AsyncClient(timeout=timeout))
+            client = await stack.enter_async_context(
+                httpx.AsyncClient(timeout=timeout, headers=self.default_headers)
+            )
             streams = await stack.enter_async_context(
                 streamable_http_client(self.url, http_client=client)
             )
@@ -434,6 +445,77 @@ class McpToolGateway:
                     self._command_queue = None
 
 
+class IdentityScopedMcpGateway:
+    """One MCP connection per Agent user, tenant, roles and platform session."""
+
+    mode = "mcp"
+
+    def __init__(
+        self,
+        url: str,
+        broker: PlatformSessionBroker,
+        connect_timeout_seconds: float = 5.0,
+        call_timeout_seconds: float = 30.0,
+    ) -> None:
+        parsed = urlparse(url)
+        if parsed.scheme != "https" and parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+            raise ValueError("平台委托凭证只允许通过 HTTPS 或回环地址传输")
+        self.url = url
+        self.broker = broker
+        self.connect_timeout_seconds = connect_timeout_seconds
+        self.call_timeout_seconds = call_timeout_seconds
+        self.max_identity_connections = 128
+        self._lock = threading.RLock()
+        self._gateways: dict[tuple[str, tuple[str, ...], str, str], McpToolGateway] = {}
+
+    def _gateway_for(self, auth: AuthContext) -> McpToolGateway:
+        delegated = self.broker.delegation(auth)
+        identity = _identity_key(auth)
+        if delegated is None:
+            self._close_identity(identity)
+            raise McpUnavailableError("当前用户尚未连接 eDME，请先提交平台业务账号完成认证")
+        session_id, token = delegated
+        key = (*identity, session_id)
+        with self._lock:
+            existing = self._gateways.get(key)
+            if existing is not None:
+                return existing
+            stale = [item for item in self._gateways if item[:3] == identity]
+            for stale_key in stale:
+                self._gateways.pop(stale_key).close()
+            while len(self._gateways) >= self.max_identity_connections:
+                oldest_key = next(iter(self._gateways))
+                self._gateways.pop(oldest_key).close()
+            gateway = McpToolGateway(
+                self.url,
+                self.connect_timeout_seconds,
+                self.call_timeout_seconds,
+                default_headers={MCP_PLATFORM_CREDENTIAL_HEADER: token},
+            )
+            self._gateways[key] = gateway
+            return gateway
+
+    def _close_identity(self, identity: tuple[str, tuple[str, ...], str]) -> None:
+        with self._lock:
+            keys = [item for item in self._gateways if item[:3] == identity]
+            for key in keys:
+                self._gateways.pop(key).close()
+
+    def catalog(self, auth: AuthContext) -> ToolCatalogSnapshot:
+        return self._gateway_for(auth).catalog(auth)
+
+    def call(self, request: ToolRequest, expected_catalog_version: str) -> ToolResponse:
+        auth = AuthContext(request.caller_user_id, request.caller_roles, request.tenant_id)
+        return self._gateway_for(auth).call(request, expected_catalog_version)
+
+    def close(self) -> None:
+        with self._lock:
+            gateways = list(self._gateways.values())
+            self._gateways.clear()
+        for gateway in gateways:
+            gateway.close()
+
+
 _gateway_lock = threading.Lock()
 _gateway: ToolGateway | None = None
 
@@ -444,11 +526,19 @@ def get_tool_gateway() -> ToolGateway:
         with _gateway_lock:
             if _gateway is None:
                 if runtime_config.mcp.agent_mode == "mcp":
-                    _gateway = McpToolGateway(
+                    gateway_type = (
+                        IdentityScopedMcpGateway
+                        if runtime_config.edme.client_delegated
+                        else McpToolGateway
+                    )
+                    arguments = [
                         runtime_config.mcp.endpoint,
                         runtime_config.mcp.connect_timeout_seconds,
                         runtime_config.mcp.call_timeout_seconds,
-                    )
+                    ]
+                    if gateway_type is IdentityScopedMcpGateway:
+                        arguments.insert(1, platform_session_broker)
+                    _gateway = gateway_type(*arguments)
                 else:
                     _gateway = LocalToolGateway()
     return _gateway

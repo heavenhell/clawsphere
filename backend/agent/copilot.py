@@ -1008,6 +1008,10 @@ def _collect_ids(text: str) -> set[str]:
     return {item.lower() for item in RESOURCE_ID_PATTERN.findall(text)}
 
 
+# Field names whose value identifies a resource rather than measuring one.
+_ID_FIELDS = {"urn", "moi", "pid", "sn", "alarmid", "objectid"}
+
+
 def _collect_tool_strings(tool_results: list[dict[str, Any]]) -> set[str]:
     """Every groundable token this turn's tool results actually contained.
 
@@ -1026,20 +1030,24 @@ def _collect_tool_strings(tool_results: list[dict[str, Any]]) -> set[str]:
     """
     values: set[str] = set()
 
-    def walk(node: Any) -> None:
+    def walk(node: Any, key: str | None = None) -> None:
         if isinstance(node, str):
             lowered = node.lower()
             values.add(lowered)
             values.update(RESOURCE_ID_PATTERN.findall(lowered))
         elif isinstance(node, dict):
-            for value in node.values():
-                walk(value)
+            for field, value in node.items():
+                walk(value, field)
         elif isinstance(node, list):
             for value in node:
-                walk(value)
+                walk(value, key)
         elif isinstance(node, (int, float)) and not isinstance(node, bool):
-            # Numeric ids (host_id: 178) are returned unquoted by eDME.
-            values.add(str(node).lower())
+            # eDME returns numeric ids unquoted (host_id: 178), so they must be
+            # groundable — but only from a field that actually names an
+            # identifier. Collecting every number would let a metric value
+            # (memory_mb: 8192) satisfy a state assertion about "8192".
+            if key and (key == "id" or key.endswith("_id") or key in _ID_FIELDS):
+                values.add(str(node).lower())
 
     for result in tool_results:
         walk(result.get("data"))

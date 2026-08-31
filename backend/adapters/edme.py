@@ -17,11 +17,47 @@ from backend.platform_config import PlatformCredentials
 LOGGER = logging.getLogger(__name__)
 
 
+def acquire_edme_session(
+    config: PlatformCredentials,
+    username: str,
+    password: str,
+    client: httpx.Client | None = None,
+) -> tuple[str, int]:
+    """Exchange a platform credential for a short-lived eDME session.
+
+    The caller owns credential lifetime. This helper never stores the username
+    or password and closes its temporary HTTP client before returning.
+    """
+    owned_client = client is None
+    request_client = client or httpx.Client(
+        base_url=config.base_url(26335),
+        verify=config.verify,
+        timeout=httpx.Timeout(30, connect=10),
+    )
+    try:
+        response = request_client.put(
+            "/rest/plat/smapp/v1/sessions",
+            headers=EDMERestAdapter._headers(),
+            json={"grantType": "password", "userName": username, "value": password},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        token = str(payload.get("accessSession") or "")
+        if not token or len(token) > 8192:
+            raise RuntimeError("eDME login response did not include a valid accessSession")
+        expires = max(60, min(int(payload.get("expires") or 1800), 86400))
+        return token, expires
+    finally:
+        if owned_client:
+            request_client.close()
+
+
 class EDMERestAdapter(EDMEInterface, DoradoInterface):
     """eDME 24.1 operations-plane adapter with token refresh and response normalization."""
 
     def __init__(self, config: PlatformCredentials, client: httpx.Client | None = None):
         self.config = config
+        self._owns_client = client is None
         self.client = client or httpx.Client(
             base_url=config.base_url(26335),
             verify=config.verify,
@@ -45,23 +81,15 @@ class EDMERestAdapter(EDMEInterface, DoradoInterface):
                 return
             if not self.config.can_login:
                 raise RuntimeError("eDME session is missing or expired and no username/password is configured")
-            response = self.client.put(
-                "/rest/plat/smapp/v1/sessions",
-                headers=self._headers(),
-                json={
-                    "grantType": "password",
-                    "userName": self.config.username,
-                    "value": self.config.password,
-                },
+            token, expires = acquire_edme_session(
+                self.config, self.config.username, self.config.password, self.client
             )
-            response.raise_for_status()
-            payload = response.json()
-            token = payload.get("accessSession")
-            if not token:
-                raise RuntimeError("eDME login response did not include accessSession")
-            expires = int(payload.get("expires") or 1800)
-            self._token = str(token)
+            self._token = token
             self._token_expires_at = monotonic() + max(30, expires - 30)
+
+    def close(self) -> None:
+        if self._owns_client:
+            self.client.close()
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         self._login()
@@ -314,52 +342,82 @@ class EDMERestAdapter(EDMEInterface, DoradoInterface):
         cluster_id: str | None = None,
         name: str | None = None,
         status: str | list[str] | None = None,
+        clusters: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """List VMs, working around vmmgmt's missing pagination.
 
         `vms/query` ignores limit/offset and only ever returns its first page,
-        so an unfiltered call silently under-reports on any real site. Filtering
-        *is* honored, so the unfiltered case is answered by fanning out one
-        query per cluster and merging — each cluster is well under a page on
-        realistic sites, and `virtual_clusters()` is the authoritative cluster
-        list. Callers that pass a filter already narrowed the query themselves
-        and get a single request.
+        so any query whose result set can exceed a page silently under-reports.
+        Filtering *is* honored, so the answer is to fan out one query per
+        cluster and merge — each cluster is well under a page on realistic
+        sites, and `virtual_clusters()` is the authoritative cluster list.
+
+        Only `cluster_id` skips the fan-out, because it already names the one
+        cluster to ask. `status`/`name` do not: "所有已停止的虚拟机" across a
+        whole site can easily exceed a page, so the caller's filters are pushed
+        down into each per-cluster query instead. `site_id` narrows which
+        clusters are visited. `clusters` lets a caller that already holds the
+        list avoid paying for it twice.
 
         Completeness is checked against each cluster's own `vm_num` rather than
         assumed: a short result is logged, because a silently truncated
         inventory is exactly what makes the agent state a wrong VM count.
-        """
-        if site_id or cluster_id or name or status:
-            query: dict[str, Any] = {}
-            if site_id:
-                query["site_id"] = site_id
-            if cluster_id:
-                query["cluster_id"] = cluster_id
-            if name:
-                query["name"] = name
-            if status:
-                query["status"] = [status] if isinstance(status, str) else list(status)
-            return self._query_vms(query)
 
-        clusters = self.virtual_clusters()
-        if not clusters:
-            return self._query_vms({})
+        Fanning out multiplies the ways a listing can fail, so one cluster's
+        error must not cost the whole inventory — it is logged and the rest are
+        still returned. But if *every* cluster fails the error is re-raised:
+        returning an empty list would assert "this site has no VMs", which is
+        the kind of confident falsehood the grounding rules exist to stop.
+        """
+        filters: dict[str, Any] = {}
+        if name:
+            filters["name"] = name
+        if status:
+            filters["status"] = [status] if isinstance(status, str) else list(status)
+
+        if cluster_id:
+            return self._query_vms({**filters, "cluster_id": cluster_id})
+
+        candidates = self.virtual_clusters() if clusters is None else clusters
+        if site_id:
+            candidates = [item for item in candidates if item.get("site_id") == site_id]
+        if not candidates:
+            # No cluster list to fan out over: a single query is all that is
+            # available, and it carries the same page limit.
+            return self._query_vms({**filters, **({"site_id": site_id} if site_id else {})})
         merged: dict[str, dict[str, Any]] = {}
-        for cluster in clusters:
+        queried = 0
+        last_error: Exception | None = None
+        for cluster in candidates:
             identifier = cluster.get("id")
             if not identifier:
                 continue
-            found = self._query_vms({"cluster_id": identifier})
-            expected = int(cluster.get("vm_count") or 0)
+            try:
+                found = self._query_vms({**filters, "cluster_id": identifier})
+            except Exception as exc:
+                last_error = exc
+                LOGGER.warning(
+                    "eDME vms/query failed for cluster %s (%s); "
+                    "its VMs are missing from this inventory",
+                    identifier, type(exc).__name__,
+                )
+                continue
+            queried += 1
+            # Only meaningful for an unfiltered listing: `vm_count` is the
+            # cluster's total, so a filtered query is expected to return fewer.
+            expected = 0 if filters else int(cluster.get("vm_count") or 0)
             if expected and len(found) < expected:
                 LOGGER.warning(
                     "eDME vms/query returned %s of %s VMs for cluster %s; "
                     "inventory is incomplete and counts derived from it will be low",
                     len(found), expected, identifier,
                 )
-            for item in found:
-                if item["id"]:
-                    merged[item["id"]] = item
+            for index, item in enumerate(found):
+                # A VM with no id cannot be deduplicated, but dropping it would
+                # quietly shrink the inventory; key it so it still surfaces.
+                merged[item["id"] or f"{identifier}#{index}"] = item
+        if not queried and last_error is not None:
+            raise last_error
         return list(merged.values())
 
     # ------------------------------------------------------------------

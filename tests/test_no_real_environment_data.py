@@ -118,3 +118,37 @@ def test_runtime_logs_are_not_committed():
         ["git", "ls-files", "logs/"], cwd=ROOT, capture_output=True, text=True
     )
     assert not result.stdout.strip(), f"logs/ 下有文件被 git 跟踪：\n{result.stdout}"
+
+
+CREDENTIAL_FILE_PATTERNS = ("*.pem", "*.key", "*.pfx", "*.p12", "*.cer", "*.crt")
+CREDENTIAL_FILE_NAMES = ("platforms.json", ".env")
+
+
+def test_no_credential_bearing_file_is_tracked_anywhere():
+    """A catch-all for files nobody thought to add to .gitignore.
+
+    The per-path assertions above only cover the files that exist today. This
+    one catches the next private key or platform config that lands under a name
+    no rule anticipated — which is how such files usually get committed.
+    """
+    import fnmatch
+    import subprocess
+
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True
+    ).stdout.splitlines()
+
+    offenders = []
+    for path in tracked:
+        name = path.rsplit("/", 1)[-1]
+        if "example" in name or "sample" in name:
+            # Templates carry no secrets and are meant to be committed.
+            continue
+        if any(fnmatch.fnmatch(name, pattern) for pattern in CREDENTIAL_FILE_PATTERNS):
+            offenders.append(path)
+        elif name in CREDENTIAL_FILE_NAMES:
+            offenders.append(path)
+
+    assert not offenders, (
+        "以下文件可能携带凭据或证书，不应被 git 跟踪：\n" + "\n".join(offenders)
+    )

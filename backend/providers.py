@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import replace
 from statistics import mean
 from typing import Any
 
@@ -107,10 +110,20 @@ class ConfiguredRepository(FusionComputeInterface, DoradoInterface, EDMEInterfac
             "hosts": sum(int(item.get("host_count") or 0) for item in clusters),
         }
 
+    def _vms_reusing(self, clusters: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """List VMs without re-fetching a cluster list the caller already holds.
+
+        The eDME fan-out needs the cluster list to know what to query; handing
+        over the one `overview()` just fetched turns 2 + N requests into 1 + N.
+        """
+        if self.config.edme.configured:
+            return self.edme.virtual_vms(clusters=clusters)
+        return self.vms()
+
     def overview(self) -> dict[str, Any]:
         clusters = self.clusters()
         hosts = self.hosts()
-        vms = self.vms()
+        vms = self._vms_reusing(clusters)
         stores = self.datastores()
         alarms = self.alarms()
         # eDME's vms/query has no pagination, so its listing can come back short
@@ -136,8 +149,11 @@ class ConfiguredRepository(FusionComputeInterface, DoradoInterface, EDMEInterfac
     def platform_status(self) -> dict[str, Any]:
         return {
             "fusioncompute": "real" if self.config.fusioncompute.configured else "mock",
-            "edme": "real" if self.config.edme.configured else "mock",
-            "storage": "edme" if self.config.edme.configured else (
+            "edme": (
+                "client-delegated" if self.config.edme.client_delegated
+                else "real" if self.config.edme.configured else "mock"
+            ),
+            "storage": "edme" if self.config.edme.available else (
                 "fusioncompute" if self.config.fusioncompute.configured else "mock"
             ),
             "mock_api_exposed": self.config.expose_mock_api,
@@ -152,6 +168,52 @@ class ConfiguredRepository(FusionComputeInterface, DoradoInterface, EDMEInterfac
             "config_path": str(self.config.source_path),
         }
 
+    def close(self) -> None:
+        closed: set[int] = set()
+        for adapter in (self.compute, self.edme, self.storage):
+            close = getattr(adapter, "close", None)
+            if callable(close) and id(adapter) not in closed:
+                closed.add(id(adapter))
+                close()
+
+
+_repository_context: ContextVar[ConfiguredRepository | None] = ContextVar(
+    "clawsphere_repository", default=None
+)
+
+
+class RepositoryProxy:
+    def __init__(self, default: ConfiguredRepository):
+        self._default = default
+
+    def current(self) -> ConfiguredRepository:
+        return _repository_context.get() or self._default
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.current(), name)
+
+
+@contextmanager
+def use_repository(repository: ConfiguredRepository):
+    token = _repository_context.set(repository)
+    try:
+        yield repository
+    finally:
+        _repository_context.reset(token)
+
+
+def delegated_edme_repository(access_session: str) -> ConfiguredRepository:
+    if not runtime_config.edme.client_delegated:
+        raise RuntimeError("eDME 未配置为客户端委托鉴权模式")
+    edme = replace(
+        runtime_config.edme,
+        auth_mode="server",
+        username="",
+        password="",
+        session=access_session,
+    )
+    return ConfiguredRepository(replace(runtime_config, edme=edme))
+
 
 runtime_config = load_runtime_config()
-repo = ConfiguredRepository(runtime_config)
+repo = RepositoryProxy(ConfiguredRepository(runtime_config))

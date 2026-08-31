@@ -218,19 +218,70 @@ def test_a_vm_reported_by_two_clusters_is_not_counted_twice():
     assert len(adapter.virtual_vms()) == 1
 
 
-def test_a_filtered_listing_stays_a_single_request():
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/rest/vmmgmt/v1/vms/query":
-            return httpx.Response(200, json={"vms": []})
-        return _routes(request)
+def _empty_vms(request: httpx.Request) -> httpx.Response:
+    if request.url.path == "/rest/vmmgmt/v1/vms/query":
+        return httpx.Response(200, json={"vms": []})
+    return _routes(request)
 
-    adapter, seen = _adapter(handler)
+
+def test_naming_one_cluster_stays_a_single_request():
+    adapter, seen = _adapter(_empty_vms)
+    adapter.virtual_vms(cluster_id="urn:sites:DEMO:clusters:11")
+
+    # The caller named the one cluster to ask; fanning out would be wasted calls.
+    queries = [r for r in seen if r.url.path == "/rest/vmmgmt/v1/vms/query"]
+    assert len(queries) == 1
+    assert json.loads(queries[0].content)["cluster_id"] == "urn:sites:DEMO:clusters:11"
+
+
+def test_a_status_filter_is_pushed_into_each_cluster_query():
+    """A status filter does not bound the result to one page.
+
+    "所有已停止的虚拟机" across a whole site can exceed the page limit just as an
+    unfiltered listing can, so the filter has to ride along with the fan-out
+    rather than replace it.
+    """
+    adapter, seen = _adapter(_empty_vms)
     adapter.virtual_vms(status="stopped")
 
-    # The caller already narrowed the query; fanning out would be wasted calls
-    # and would also drop the caller's own filter.
-    assert len([r for r in seen if r.url.path == "/rest/vmmgmt/v1/vms/query"]) == 1
-    assert json.loads(seen[-1].content)["status"] == ["stopped"]
+    queries = [json.loads(r.content) for r in seen if r.url.path == "/rest/vmmgmt/v1/vms/query"]
+    assert len(queries) == 2
+    assert all(q["status"] == ["stopped"] for q in queries)
+    assert {q["cluster_id"] for q in queries} == {
+        "urn:sites:DEMO:clusters:11", "urn:sites:DEMO:clusters:12",
+    }
+
+
+def test_site_id_narrows_which_clusters_are_visited():
+    adapter, seen = _adapter(_empty_vms)
+    adapter.virtual_vms(site_id="urn:sites:DEMO")
+    both = [r for r in seen if r.url.path == "/rest/vmmgmt/v1/vms/query"]
+
+    adapter, seen = _adapter(_empty_vms)
+    adapter.virtual_vms(site_id="urn:sites:OTHER")
+    none_matching = [r for r in seen if r.url.path == "/rest/vmmgmt/v1/vms/query"]
+
+    assert len(both) == 2
+    # No cluster belongs to that site, so there is nothing to fan out over and
+    # the single fallback query carries the site filter.
+    assert len(none_matching) == 1
+    assert json.loads(none_matching[0].content)["site_id"] == "urn:sites:OTHER"
+
+
+def test_a_filtered_listing_does_not_warn_about_being_short(caplog):
+    """`vm_count` is the cluster's total, so a filtered query returning fewer is
+    correct, not evidence of truncation. Warning there would train the reader to
+    ignore the warning that matters."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/rest/vmmgmt/v1/vms/query":
+            return httpx.Response(200, json={"vms": [_vm("urn:vms:1", "vm-a", "c", "stopped")]})
+        return _routes(request)
+
+    adapter, _ = _adapter(handler)
+    with caplog.at_level(logging.WARNING, logger="backend.adapters.edme"):
+        adapter.virtual_vms(status="stopped")
+
+    assert not [r for r in caplog.records if "incomplete" in r.message]
 
 
 def test_a_short_cluster_listing_is_logged_rather_than_passed_off_as_complete(caplog):
@@ -386,3 +437,118 @@ def test_mock_mode_keeps_counting_what_it_actually_has(tmp_path):
     # Mock clusters advertise 38 + 24 VMs while the fixture holds far fewer; the
     # platform-reported total is an eDME workaround and must not leak here.
     assert overview["vm_count"] == len(repository.vms())
+
+
+# --- Fan-out failure modes ---------------------------------------------------
+# Querying per cluster multiplies the ways a listing can fail, so each failure
+# mode needs its own answer.
+
+def test_one_failing_cluster_does_not_cost_the_whole_inventory(caplog):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/rest/vmmgmt/v1/vms/query":
+            body = json.loads(request.content)
+            if body.get("cluster_id", "").endswith(":11"):
+                return httpx.Response(500, json={"error": "internal"})
+            return httpx.Response(200, json={"vms": [_vm("urn:vms:2", "vm-b", "c")]})
+        return _routes(request)
+
+    adapter, _ = _adapter(handler)
+    with caplog.at_level(logging.WARNING, logger="backend.adapters.edme"):
+        vms = adapter.virtual_vms()
+
+    # Losing every VM because one cluster is unhealthy is worse than reporting
+    # the rest and saying so.
+    assert [item["id"] for item in vms] == ["urn:vms:2"]
+    assert any("failed for cluster" in record.message for record in caplog.records)
+
+
+def test_a_total_query_failure_raises_instead_of_reporting_an_empty_site():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/rest/vmmgmt/v1/vms/query":
+            return httpx.Response(503, json={"error": "unavailable"})
+        return _routes(request)
+
+    adapter, _ = _adapter(handler)
+    # An empty list here would read as "this site has no VMs" — a confident
+    # falsehood. The error has to reach the caller.
+    with pytest.raises(httpx.HTTPStatusError):
+        adapter.virtual_vms()
+
+
+def test_a_vm_without_an_id_is_still_reported():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/rest/vmmgmt/v1/vms/query":
+            body = json.loads(request.content)
+            if body.get("cluster_id", "").endswith(":11"):
+                anonymous = _vm("", "vm-no-id", "c")
+                return httpx.Response(200, json={"vms": [anonymous]})
+            return httpx.Response(200, json={"vms": []})
+        return _routes(request)
+
+    adapter, _ = _adapter(handler)
+    vms = adapter.virtual_vms()
+
+    # It cannot be deduplicated, but dropping it would quietly shrink the count.
+    assert [item["name"] for item in vms] == ["vm-no-id"]
+
+
+def test_a_site_with_no_clusters_falls_back_to_a_single_query():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/rest/vmmgmt/v1/clusters/query":
+            return httpx.Response(200, json={"clusters": []})
+        if request.url.path == "/rest/vmmgmt/v1/vms/query":
+            return httpx.Response(200, json={"vms": [_vm("urn:vms:1", "vm-a", "c")]})
+        return _routes(request)
+
+    adapter, seen = _adapter(handler)
+    vms = adapter.virtual_vms()
+
+    assert len(vms) == 1
+    queries = [r for r in seen if r.url.path == "/rest/vmmgmt/v1/vms/query"]
+    assert len(queries) == 1 and json.loads(queries[0].content) == {}
+
+
+# --- Repository routing: remaining branches ---------------------------------
+
+def test_the_aggregate_metrics_endpoint_is_guarded_too(tmp_path):
+    repository = _edme_repo(tmp_path)
+    # vm_metrics and cluster_daily_growth_gb are covered above; metrics() shares
+    # the same guard and must not be the one gap that leaks mock data.
+    with pytest.raises(ValueError, match="FusionCompute"):
+        repository.metrics()
+
+
+def test_overview_falls_back_to_listing_length_when_the_platform_reports_nothing(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/rest/vmmgmt/v1/clusters/query":
+            stripped = [{**item, "vm_num": 0, "host_num": 0} for item in CLUSTERS["clusters"]]
+            return httpx.Response(200, json={"clusters": stripped})
+        if request.url.path == "/rest/vmmgmt/v1/vms/query":
+            return httpx.Response(200, json={"vms": [_vm("urn:vms:1", "vm-a", "c")]})
+        return _routes(request)
+
+    repository = _edme_repo(tmp_path)
+    repository.edme, _ = _adapter(handler)
+    overview = repository.overview()
+
+    # max() must not turn an absent platform total into a zero count.
+    assert overview["vm_count"] == 1
+    assert overview["host_count"] == 1
+
+
+def test_overview_does_not_pay_for_the_cluster_list_twice(tmp_path):
+    """overview() needs clusters, and so does the VM fan-out.
+
+    Fetching it once and handing it down turns 2 + N requests into 1 + N. On a
+    site with many clusters the duplicate is not free, and it is invisible
+    unless asserted.
+    """
+    repository = _edme_repo(tmp_path)
+    adapter, seen = _adapter(_empty_vms)
+    repository.edme = adapter
+    repository.storage = adapter
+
+    repository.overview()
+
+    cluster_queries = [r for r in seen if r.url.path == "/rest/vmmgmt/v1/clusters/query"]
+    assert len(cluster_queries) == 1

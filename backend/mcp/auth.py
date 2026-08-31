@@ -13,6 +13,9 @@ JWT_ALGORITHM = "HS256"
 MCP_CALLER_TOKEN_AUDIENCE = "clawsphere-mcp-server"
 MCP_CALLER_TOKEN_ISSUER = "clawsphere-agent"
 MCP_CALLER_TOKEN_META_KEY = "com.clawsphere/caller-token"
+MCP_PLATFORM_CREDENTIAL_HEADER = "X-ClawSphere-Platform-Credential"
+MCP_PLATFORM_TOKEN_AUDIENCE = "clawsphere-mcp-platform-delegation"
+MCP_PLATFORM_TOKEN_ISSUER = "clawsphere-agent-platform-broker"
 DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
 JWT_SECRET = os.getenv("DCS_JWT_SECRET")
 if not JWT_SECRET:
@@ -23,6 +26,14 @@ if not JWT_SECRET:
 if not DEMO_MODE and len(JWT_SECRET) < 32:
     raise RuntimeError("DCS_JWT_SECRET must contain at least 32 characters")
 ALLOW_ANONYMOUS = DEMO_MODE and os.getenv("DCS_ALLOW_ANONYMOUS", "true").lower() == "true"
+MCP_DELEGATION_SECRET = os.getenv("DCS_MCP_DELEGATION_SECRET")
+if not MCP_DELEGATION_SECRET:
+    if DEMO_MODE:
+        MCP_DELEGATION_SECRET = "clawsphere-demo-platform-delegation-secret"
+    else:
+        raise RuntimeError("DCS_MCP_DELEGATION_SECRET is required when DEMO_MODE=false")
+if not DEMO_MODE and len(MCP_DELEGATION_SECRET) < 32:
+    raise RuntimeError("DCS_MCP_DELEGATION_SECRET must contain at least 32 characters")
 
 
 @dataclass(frozen=True)
@@ -30,6 +41,15 @@ class AuthContext:
     user_id: str
     roles: list[str]
     tenant_id: str
+
+
+@dataclass(frozen=True)
+class PlatformDelegation:
+    auth: AuthContext
+    platform_id: str
+    access_session: str
+    session_id: str
+    expires_at: int
 
 
 def issue_demo_token(user_id: str = "demo-user", roles: list[str] | None = None, tenant_id: str = "demo-tenant") -> str:
@@ -110,6 +130,80 @@ def decode_mcp_caller_token(token: str) -> tuple[AuthContext, str]:
             tenant_id=str(payload.get("tenant_id") or "default"),
         ),
         task_id,
+    )
+
+
+def issue_platform_delegation_token(
+    auth: AuthContext,
+    platform_id: str,
+    access_session: str,
+    session_id: str,
+    expires_at: int,
+) -> str:
+    """Wrap a platform session for one authenticated user and tenant.
+
+    This JWT is signed, not encrypted. Its confidentiality therefore depends
+    on TLS (or a loopback-only MCP endpoint), which the client gateway enforces.
+    """
+    now = datetime.now(timezone.utc)
+    if not access_session or len(access_session) > 8192:
+        raise ValueError("invalid platform access session")
+    if expires_at <= int(now.timestamp()):
+        raise ValueError("platform access session has expired")
+    return jwt.encode(
+        {
+            "sub": auth.user_id,
+            "tenant_id": auth.tenant_id,
+            "platform_id": platform_id,
+            "access_session": access_session,
+            "session_id": session_id,
+            "iss": MCP_PLATFORM_TOKEN_ISSUER,
+            "aud": MCP_PLATFORM_TOKEN_AUDIENCE,
+            "iat": now,
+            "exp": expires_at,
+        },
+        MCP_DELEGATION_SECRET,
+        algorithm=JWT_ALGORITHM,
+    )
+
+
+def decode_platform_delegation_token(
+    token: str,
+    expected_auth: AuthContext | None = None,
+) -> PlatformDelegation:
+    try:
+        payload: dict[str, Any] = jwt.decode(
+            token,
+            MCP_DELEGATION_SECRET,
+            algorithms=[JWT_ALGORITHM],
+            audience=MCP_PLATFORM_TOKEN_AUDIENCE,
+            issuer=MCP_PLATFORM_TOKEN_ISSUER,
+            options={"require": ["sub", "tenant_id", "platform_id", "access_session", "session_id", "exp"]},
+        )
+    except jwt.PyJWTError as exc:
+        raise PermissionError("无效或已过期的平台委托令牌") from exc
+    auth = AuthContext(
+        user_id=str(payload.get("sub") or ""),
+        roles=list(expected_auth.roles) if expected_auth else ["readonly"],
+        tenant_id=str(payload.get("tenant_id") or ""),
+    )
+    if expected_auth and (
+        auth.user_id != expected_auth.user_id or auth.tenant_id != expected_auth.tenant_id
+    ):
+        raise PermissionError("平台委托令牌与 MCP 调用者身份不匹配")
+    platform_id = str(payload.get("platform_id") or "")
+    access_session = str(payload.get("access_session") or "")
+    session_id = str(payload.get("session_id") or "")
+    if platform_id != "edme" or not access_session or len(access_session) > 8192:
+        raise PermissionError("平台委托令牌内容无效")
+    if not 8 <= len(session_id) <= 128:
+        raise PermissionError("平台委托令牌缺少有效 session_id")
+    return PlatformDelegation(
+        auth=auth,
+        platform_id=platform_id,
+        access_session=access_session,
+        session_id=session_id,
+        expires_at=int(payload["exp"]),
     )
 
 
