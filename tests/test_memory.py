@@ -442,3 +442,82 @@ def test_responder_payload_includes_skill_and_tool_search_summaries_and_stays_un
     assert parsed["tool_search_request"]["query"] == "get_vm_metrics"
     assert parsed["tool_search_candidates"][0]["tool_name"] == "get_vm_metrics"
     assert parsed["retrieved_cases"][0]["title"] == "CPU Ready 过高历史案例"
+
+
+# --- Large tool results (list summarization before the responder) ------------
+# Shaped like backend/adapters/edme.py's virtual_alarms() output: numeric
+# severity_code plus a label, which is what a real site returns by the hundred.
+
+def _edme_alarm(index: int, severity_code: int) -> dict:
+    labels = {1: "critical", 2: "major", 3: "minor", 4: "warning"}
+    return {
+        "id": f"0x810{index:04d}",
+        "severity": labels[severity_code],
+        "severity_code": severity_code,
+        "name": "主机CPU使用率超过阈值",
+        "object_type": "host",
+        "object_id": f"urn:sites:3F0A:hosts:{index}",
+        "status": "active",
+        "additional_information": "CPU 使用率持续超过阈值 " * 10,
+    }
+
+
+def test_a_large_alarm_list_is_grouped_instead_of_shipped_whole():
+    # 4 critical + 6 major + 190 low-severity: the shape that blows the payload
+    # cap on a real site.
+    alarms = (
+        [_edme_alarm(i, 1) for i in range(4)]
+        + [_edme_alarm(100 + i, 2) for i in range(6)]
+        + [_edme_alarm(200 + i, 4) for i in range(190)]
+    )
+    summarized = copilot._summarize_tool_result(
+        {"tool_name": "list_alarms", "success": True, "error_code": None, "data": alarms}
+    )
+
+    data = summarized["data"]
+    assert data["total"] == 200
+    assert data["grouped_counts"]["critical"] == 4
+    assert data["grouped_counts"]["warning"] == 190
+    # Detail is kept only where an operator needs it; the rest becomes counts.
+    assert data["detail_kept"] == 10
+    assert data["collapsed_count"] == 190
+    assert {item["severity"] for item in data["high_severity_detail"]} == {"critical", "major"}
+
+
+def test_a_small_alarm_list_is_left_alone():
+    alarms = [_edme_alarm(i, 2) for i in range(4)]
+    # Below the threshold the raw entries are more useful than a summary, and
+    # the payload can afford them.
+    assert copilot._summarize_tool_result(
+        {"tool_name": "list_alarms", "success": True, "error_code": None, "data": alarms}
+    ) is None
+
+
+def test_summarizing_the_payload_does_not_weaken_grounding():
+    """The responder sees a summary; grounding still checks the real results.
+
+    A collapsed alarm is invisible to the model, so it cannot be asserted — but
+    if the model does name a resource that was collapsed, the claim is still
+    backed by data the tool genuinely returned and must not be rejected.
+    """
+    alarms = [_edme_alarm(i, 4) for i in range(30)]
+    state = {
+        "message": "有哪些告警",
+        "conversation_summary": "", "working_context": {}, "recent_messages": [],
+        "loaded_skills": [], "retrieved_cases": [], "skill_decision": {},
+        "tool_search_request": {}, "tool_search_candidates": [], "route_decisions": [],
+        "plan": [], "error": None,
+        "tool_results": [{
+            "tool_name": "list_alarms", "success": True, "error_code": None, "data": alarms,
+        }],
+    }
+    payload = json.loads(copilot._responder_payload(state))
+    assert payload["tool_results"][0]["data"]["collapsed_count"] == 30
+
+    collapsed_id = alarms[7]["object_id"]
+    grounded, _ = copilot.verify_resource_claims(
+        f"其中 {collapsed_id} 也在告警中。",
+        [{"id": collapsed_id, "kind": "state_assertion", "from_tool": "list_alarms"}],
+        state["tool_results"],
+    )
+    assert grounded

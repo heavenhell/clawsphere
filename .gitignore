@@ -3,9 +3,11 @@ __pycache__/
 *.pyc
 .env
 /config/platforms.json
+/config/platforms.*.json
 node_modules/
 dist/
 *.log
+/logs/
 /data/
 output/
 .playwright-cli/

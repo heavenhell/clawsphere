@@ -177,7 +177,7 @@ Skill 决策链         skill_decision, selected_skill_ids, loaded_skills, skill
 
 ### LLM1 — `skill_router`（`SKILL_ROUTER_PROMPT`, `copilot.py:110`）
 
-- 输入：`IDENTITY_BLOCK` + 角色过滤后的 Skill 目录（`skill_catalog_tier1(roles)`）+ 角色过滤后的**工具 tier1 目录**（`tool_catalog_tier1(roles)`，`tools.py`，只有工具名+分类+一句话描述，**不含参数 schema**）+ 会话摘要 + 最近 6 条消息 + 当前消息。两个目录都是每次调用现算，不是模块加载时固定的常量。
+- 输入：`IDENTITY_BLOCK` + 角色过滤后的 Skill 目录（`skill_catalog_tier1(roles)`）+ 角色过滤后的**工具 tier1 目录**（`tool_catalog_tier1(roles)`，`tools.py`，只有工具名+分类+一句话描述，**不含参数 schema**）+ 会话摘要 + `working_context` + 最近 6 条消息 + 当前消息。`working_context.active_resource_ids` 抗压缩不丢，是本阶段消解"它/这台机器"最可靠的依据（摘要和最近窗口都是有损的）。两个目录都是每次调用现算，不是模块加载时固定的常量。
 - 输出 JSON：`decision ∈ {use_skill, use_tool_directly, direct_answer, clarification_required}`、`skill_ids`（仅 `use_skill` 有意义）、`arguments`、`confidence`、`missing_context`、`reason_summary`。
   - `use_tool_directly`：没有 Skill 覆盖这个请求，但工具目录里能看出需要哪类数据，跳过 `skill_loader` 直接进入 `tool_search_planner`（LLM2），走跟 `use_skill` 完全相同的后半程（工具检索 → 工具调用 → 护栏 → 执行），只是 Skill 上下文为空。这条路径存在的原因：Skill 一句话摘要不一定覆盖所有能用工具回答的问题（例如当前 4 个 Skill 都没提写操作和 eDME），在此之前"没命中 Skill"等于"这轮请求永远碰不到任何工具"，现在多一条不依赖 Skill 目录覆盖面的兜底路径。
 - 失败关闭：JSON 无法解析 / `decision` 非法 / `use_skill` 但 `skill_ids` 为空 → 全部归一为 `direct_answer`（`plan_source="skill_router_fallback"`），不重试。

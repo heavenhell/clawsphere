@@ -727,3 +727,57 @@ def test_production_mode_requires_explicit_secret():
     )
     assert result.returncode != 0
     assert "DCS_JWT_SECRET is required" in result.stderr
+
+
+def test_tls_verification_is_on_unless_explicitly_disabled():
+    """The LLM request carries the API key, so verification must default to on.
+
+    Tested through `env_flag` on a throwaway name rather than the real constant:
+    that constant is frozen at import from whatever the developer's own .env
+    says, while the guarantee under test is about a machine that sets nothing.
+    """
+    assert llm.env_flag("DCS_TEST_TLS_FLAG_UNSET", True) is True
+    for disabled in ("false", "0", "no", "off", "FALSE"):
+        os.environ["DCS_TEST_TLS_FLAG"] = disabled
+        assert llm.env_flag("DCS_TEST_TLS_FLAG", True) is False
+
+    # A typo must not silently disable verification.
+    os.environ["DCS_TEST_TLS_FLAG"] = "flase"
+    assert llm.env_flag("DCS_TEST_TLS_FLAG", True) is True
+    os.environ.pop("DCS_TEST_TLS_FLAG", None)
+
+
+def test_llm_client_is_built_with_the_configured_verification_and_proxy(monkeypatch):
+    built: list[dict] = []
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            built.append(kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def post(self, *args, **kwargs):
+            raise RuntimeError("stop after client construction")
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setattr(llm.httpx, "Client", FakeClient)
+    monkeypatch.setattr(llm, "DEEPSEEK_VERIFY_SSL", True)
+    monkeypatch.setattr(llm, "DEEPSEEK_PROXY_ENABLED", False)
+    monkeypatch.setattr(llm, "DEEPSEEK_PROXY", "http://proxy.local:8080")
+
+    with pytest.raises(RuntimeError, match="stop after client construction"):
+        llm._invoke({"model": "m", "messages": [{"role": "user", "content": "hi"}]})
+
+    assert built and built[0]["verify"] is True
+    # The proxy address alone must not route traffic; the switch decides.
+    assert "proxy" not in built[0]
+
+    built.clear()
+    monkeypatch.setattr(llm, "DEEPSEEK_PROXY_ENABLED", True)
+    with pytest.raises(RuntimeError, match="stop after client construction"):
+        llm._invoke({"model": "m", "messages": [{"role": "user", "content": "hi"}]})
+    assert built[0]["proxy"] == "http://proxy.local:8080"

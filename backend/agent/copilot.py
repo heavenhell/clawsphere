@@ -157,8 +157,11 @@ TOOL_SEARCH_PROMPT = f"""{IDENTITY_BLOCK}
 
 当前阶段:工具检索。你可能已经拿到一个 Skill 的完整内容;如果没有,说明这个请求不对应任何已知 Skill,
 你需要直接基于用户消息和历史判断需要什么数据。判断本轮是否需要调用真实工具获取数据:
-- 需要就调用 ToolSearch,给出简短的检索 query(用于在工具目录里做关键词检索)、期望返回的候选数量 top_k,以及可选的 required_capabilities 标签。
-- 不需要实时数据(纯概念/流程说明)就不要调用 ToolSearch。
+- **涉及当前状态/实时数据的查询(告警、资源清单、主机/VM/集群、存储、容量、性能指标等)必须调用 ToolSearch 检索工具**,
+  给出简短的检索 query(用于在工具目录里做关键词检索)、期望返回的候选数量 top_k,以及可选的 required_capabilities 标签。
+  即使历史对话里有之前的查询结果,也必须重新检索工具以获取**本轮最新数据**,不得直接复用旧数据。
+- 仅当请求是纯概念/流程/寒暄(不需要任何平台数据)时才不调用 ToolSearch。
+- **严禁在本阶段直接输出面向用户的完整回答**:本阶段只做"是否检索工具"的决策,输出必须是一条 ToolSearch 调用,或一个带简短理由的 declined(仅限确实不需要数据的情形)。不得把最终回答内容写进 reason。
 
 工具目录按以下几类组织,你看不到具体工具名和参数 schema,只需要用自然语言描述需要什么数据:
 - alert:告警查询
@@ -173,7 +176,9 @@ TOOL_CALL_PROMPT = f"""{IDENTITY_BLOCK}
 规则:
 - 优先使用最少、最相关的工具,只从下面提供的候选里选,不要假设存在没给你的工具。
 - 调用工具时严格按参数 schema 传参,不要添加 schema 未定义的字段,不确定的可选参数就不要传。
-- 只有用户明确指向的对象(VM/集群/告警/存储 ID 或名称)才调用相关工具;缺少标识时不要猜测资源,也不要调用工具。
+- 列表/清单/统计类问题(如"有哪些告警""列出资源""多少台VM""当前状态")必须调用对应的列表查询工具获取**本轮最新数据**,
+  即使历史对话里有之前的查询结果,也必须重新调用工具,不得直接复用旧数据回答——本轮没有工具数据支撑的状态断言会被守卫拒绝。
+- 只有用户明确指向的对象(VM/集群/告警/存储 ID 或名称)才调用对应的详情工具;缺少标识时不要猜测资源,也不要调用工具。
 - 写操作(重启/扩容/迁移/修改/删除)只提出对应工具调用,是否执行由护栏和审批独立裁决,你无法绕过。
 - 追问("它呢""第二条""上面说的X")请结合历史自行消解指代。"""
 
@@ -348,6 +353,10 @@ def _skill_router_payload(state: CopilotState) -> str:
     payload = {
         "message": state["message"],
         "conversation_summary": state.get("conversation_summary", "")[:1500],
+        # The resource pointer survives compaction intact, so it is the most
+        # reliable basis this stage has for resolving "它/这台机器" — the summary
+        # and recent window are both lossy.
+        "working_context": state.get("working_context", {}),
         "recent_messages": state.get("recent_messages", [])[-6:],
         "skill_catalog": skill_catalog_tier1(state["user_roles"]),
         "tool_catalog": tier1_catalog,
@@ -1097,19 +1106,85 @@ def _cap(value: Any, limit: int) -> Any:
     return text[:limit] + "…(截断)"
 
 
+# Above this size, a list-typed tool result is summarized (grouped counts +
+# high-severity detail only) instead of being shipped raw to the LLM, so a huge
+# inventory (e.g. hundreds of alarms) does not blow up the responder payload.
+LIST_SUMMARY_MIN = 15
+HIGH_SEVERITY_DETAIL_MAX = 40
+HIGH_SEVERITY_LABELS = {"critical", "major", "fatal", "紧急", "重要"}
+
+
+def _summarize_tool_result(item: dict[str, Any]) -> dict[str, Any] | None:
+    """Structured summary for list-typed tool results before they reach the LLM.
+
+    Returns the summarized payload dict when the data is a large, severity-bearing
+    list; returns None when it is not (caller then falls back to raw capping).
+    Keeps full entries only for high-severity items (bounded by
+    HIGH_SEVERITY_DETAIL_MAX), collapses the rest into grouped counts, and
+    preserves total/detail counts so the model still understands the full scope.
+    Resource IDs inside the kept entries are preserved; grounding always checks
+    the *original* tool_results in state, never this summarized view.
+    """
+    data = item.get("data")
+    if not isinstance(data, list) or len(data) <= LIST_SUMMARY_MIN:
+        return None
+    if not data or not isinstance(data[0], dict):
+        return None
+
+    sev_key = next((k for k in ("severity", "severity_code") if k in data[0]), None)
+    if sev_key is None:
+        return None
+
+    counts: dict[str, int] = {}
+    high: list[dict[str, Any]] = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        value = entry.get(sev_key)
+        label = str(value).lower() if value is not None else "unknown"
+        counts[label] = counts.get(label, 0) + 1
+        is_high = (
+            label in HIGH_SEVERITY_LABELS
+            or (isinstance(value, int) and 0 < value <= 2)
+        )
+        if is_high and len(high) < HIGH_SEVERITY_DETAIL_MAX:
+            high.append(entry)
+
+    return {
+        "tool_name": item.get("tool_name"),
+        "success": item.get("success"),
+        "error_code": item.get("error_code"),
+        "data": {
+            "_summary": "列表过大,已按级别分组摘要,仅保留高严重级别部分明细",
+            "total": len(data),
+            "grouped_counts": counts,
+            "high_severity_detail": high,
+            "high_severity_total": sum(c for k, c in counts.items() if k in HIGH_SEVERITY_LABELS or (k.isdigit() and int(k) <= 2)),
+            "detail_kept": len(high),
+            "collapsed_count": len(data) - len(high),
+        },
+    }
+
+
 def _responder_payload(state: CopilotState, feedback: str = "") -> str:
     """Bounded payload for the responder. The full tool_results can exceed the
-    outbound size cap, so each result's data is capped and low-value context is
-    trimmed. Resource IDs are preserved so grounding stays meaningful."""
-    tool_results = [
-        {
+    outbound size cap, so list-type results are summarized first and any
+    remaining result is character-capped; low-value context is trimmed. Resource
+    IDs are preserved so grounding stays meaningful."""
+    tool_results = []
+    for item in state.get("tool_results", []):
+        entry = {
             "tool_name": item.get("tool_name"),
             "success": item.get("success"),
             "error_code": item.get("error_code"),
-            "data": _cap(item.get("data"), RESPONDER_TOOL_DATA_CAP),
+            "data": item.get("data"),
         }
-        for item in state.get("tool_results", [])
-    ]
+        summarized = _summarize_tool_result(entry)
+        if summarized is not None:
+            tool_results.append(summarized)
+        else:
+            entry["data"] = _cap(entry["data"], RESPONDER_TOOL_DATA_CAP)
+            tool_results.append(entry)
     skill_decision = state.get("skill_decision") or {}
     payload = {
         "message": state["message"],
@@ -1246,7 +1321,18 @@ def llm_responder(state: CopilotState) -> CopilotState:
             task_id=state.get("task_id", ""),
             claims=claims,
         )
-        feedback = reason
+        # Grounding rejected: steer the retry toward a compliant answer. If the
+        # reason is a lack of this-turn tool data, the model cannot assert current
+        # state — it must either reference history as example, or the agent has to
+        # call a live tool (handled upstream in tool_call_planner).
+        if "无工具数据支撑" in reason or "无数据支撑" in reason:
+            feedback = (
+                f"{reason}。本轮没有对应工具结果来支撑该资源的当前状态:不要断言其当前状态,"
+                f"只能将其申报为 {{'kind': 'example'}} 引用历史上下文;"
+                f"若需要真实当前状态,请在工具调用阶段先调用对应查询工具。"
+            )
+        else:
+            feedback = reason
         last_reason = "grounding_rejected"
 
     return {
