@@ -140,6 +140,34 @@ class MemoryDatabase:
                 );
                 CREATE INDEX IF NOT EXISTS idx_rate_window
                     ON tool_rate_events(tool_name, resource_id, created_at);
+                -- Long-term (cross-session) memory index. The markdown files on
+                -- disk are the source of truth; these two tables exist only to
+                -- make lookup indexed and can be rebuilt from the files.
+                CREATE TABLE IF NOT EXISTS long_term_facts (
+                    name TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    conversation_id TEXT NOT NULL,
+                    merge_key TEXT NOT NULL,
+                    fact_type TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    outcome TEXT NOT NULL DEFAULT '',
+                    tools_used TEXT NOT NULL DEFAULT '[]',
+                    resource_ids TEXT NOT NULL DEFAULT '[]',
+                    observed_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_long_term_scope
+                    ON long_term_facts(tenant_id, user_id, observed_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_long_term_merge
+                    ON long_term_facts(tenant_id, user_id, merge_key);
+                CREATE TABLE IF NOT EXISTS long_term_fact_resources (
+                    name TEXT NOT NULL,
+                    resource_id TEXT NOT NULL,
+                    PRIMARY KEY (name, resource_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_long_term_resource
+                    ON long_term_fact_resources(resource_id);
                 """
             )
             self._add_column_if_missing(connection, "memory_writes", "user_id", "TEXT NOT NULL DEFAULT 'legacy-user'")
@@ -429,6 +457,97 @@ class MemoryDatabase:
                 WHERE task_id = ? AND tool_name = ? AND resource_id = ?
                 """,
                 (task_id, tool_name, resource_id),
+            )
+
+    # --- Long-term memory index ------------------------------------------
+    # Every read is scoped by (tenant_id, user_id): cross-user visibility of
+    # operational history is a privilege escalation, not a convenience.
+
+    def upsert_long_term_fact(self, record: dict[str, Any]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock, self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO long_term_facts
+                    (name, tenant_id, user_id, conversation_id, merge_key, fact_type,
+                     description, outcome, tools_used, resource_ids, observed_at, updated_at)
+                VALUES
+                    (:name, :tenant_id, :user_id, :conversation_id, :merge_key, :fact_type,
+                     :description, :outcome, :tools_used, :resource_ids, :observed_at, :updated_at)
+                ON CONFLICT(name) DO UPDATE SET
+                    fact_type=excluded.fact_type, description=excluded.description,
+                    outcome=excluded.outcome, tools_used=excluded.tools_used,
+                    resource_ids=excluded.resource_ids, observed_at=excluded.observed_at,
+                    updated_at=excluded.updated_at
+                """,
+                {**record, "updated_at": now},
+            )
+            connection.execute(
+                "DELETE FROM long_term_fact_resources WHERE name = ?", (record["name"],)
+            )
+            connection.executemany(
+                "INSERT OR IGNORE INTO long_term_fact_resources(name, resource_id) VALUES (?, ?)",
+                [(record["name"], item) for item in json.loads(record["resource_ids"])],
+            )
+
+    def find_long_term_fact_by_merge_key(
+        self, tenant_id: str, user_id: str, merge_key: str, updated_after: str
+    ) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM long_term_facts
+                WHERE tenant_id = ? AND user_id = ? AND merge_key = ? AND updated_at >= ?
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (tenant_id, user_id, merge_key, updated_after),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def query_long_term_facts(
+        self,
+        tenant_id: str,
+        user_id: str,
+        resource_id: str | None = None,
+        fact_type: str | None = None,
+        observed_after: str | None = None,
+        limit: int = 3,
+    ) -> list[dict[str, Any]]:
+        query = [
+            "SELECT f.* FROM long_term_facts f",
+            "WHERE f.tenant_id = ? AND f.user_id = ?",
+        ]
+        params: list[Any] = [tenant_id, user_id]
+        if resource_id:
+            query.insert(1, "JOIN long_term_fact_resources r ON r.name = f.name")
+            query.append("AND r.resource_id = ?")
+            params.append(resource_id.lower())
+        if fact_type:
+            query.append("AND f.fact_type = ?")
+            params.append(fact_type)
+        if observed_after:
+            query.append("AND f.observed_at >= ?")
+            params.append(observed_after)
+        query.append("ORDER BY f.observed_at DESC LIMIT ?")
+        params.append(limit)
+        with self.connect() as connection:
+            rows = connection.execute(" ".join(query), params).fetchall()
+        return [dict(row) for row in rows]
+
+    def clear_long_term_facts(self, tenant_id: str, user_id: str) -> None:
+        """Drop the index for one owner so it can be rebuilt from the files."""
+        with self._lock, self.connect() as connection:
+            connection.execute(
+                """
+                DELETE FROM long_term_fact_resources WHERE name IN (
+                    SELECT name FROM long_term_facts WHERE tenant_id = ? AND user_id = ?
+                )
+                """,
+                (tenant_id, user_id),
+            )
+            connection.execute(
+                "DELETE FROM long_term_facts WHERE tenant_id = ? AND user_id = ?",
+                (tenant_id, user_id),
             )
 
     def release_tool_rate_slots(self, task_id: str) -> None:

@@ -94,6 +94,17 @@ class ModifyHaPolicyParams(ClusterCapacityParams):
     reason: str = Field(min_length=5, max_length=500)
 
 
+class SessionHistoryParams(ToolParams):
+    # Every field is optional: the model picks which one to fill, and that
+    # choice is the query plan (exact resource lookup vs. type/time sweep vs.
+    # keyword fallback for questions that name no resource).
+    resource_id: str | None = Field(default=None, min_length=2, max_length=80)
+    fact_type: str | None = Field(default=None, pattern=r"^(incident|change|preference|resource)$")
+    keywords: str | None = Field(default=None, min_length=1, max_length=200, pattern=r"^[^\x00-\x1f\x7f]+$")
+    since_days: int = Field(default=90, ge=1, le=365)
+    limit: int = Field(default=3, ge=1, le=5)
+
+
 class ToolSearchRequest(ToolParams):
     # Excludes control characters (incl. newlines) — this is a single-line BM25
     # query, not free text; otherwise permissive of CJK/ASCII/punctuation.

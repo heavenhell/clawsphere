@@ -126,6 +126,34 @@ def get_vm_metrics(
 
 
 @mcp.tool()
+def search_session_history(
+    resource_id: str | None = None,
+    fact_type: str | None = None,
+    keywords: str | None = None,
+    since_days: int = 90,
+    limit: int = 3,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """Recall past diagnoses, applied fixes and executed changes for a resource.
+
+    Returns historical observations, never current state. Scoping to the caller
+    happens server-side from the signed token, so no identity argument is
+    accepted here.
+    """
+    return _call(
+        "search_session_history",
+        {
+            "resource_id": resource_id,
+            "fact_type": fact_type,
+            "keywords": keywords,
+            "since_days": since_days,
+            "limit": limit,
+        },
+        ctx=ctx,
+    )
+
+
+@mcp.tool()
 def get_cluster_capacity(cluster_id: str, ctx: Context) -> dict[str, Any]:
     """Read current capacity and risk for a cluster."""
     return _call("get_cluster_capacity", {"cluster_id": cluster_id}, ctx=ctx)

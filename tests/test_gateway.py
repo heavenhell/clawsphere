@@ -120,6 +120,52 @@ def test_undeclared_resource_in_answer_is_rejected():
     assert "host-005" in reason
 
 
+def test_an_id_buried_in_a_tool_text_field_still_grounds():
+    """Real platforms return ids inside compound text, not only as own fields.
+
+    eDME's alarm MOI is one string carrying the object type, name and URN, and
+    alarm names mention the resource inline. Matching whole field values only
+    would reject an answer whose id genuinely came from this turn's tool — the
+    model would be told to retract a true statement.
+    """
+    grounded, _ = verify_resource_claims(
+        "vm-1001 当前内存不足，由 alarm-9003 上报。",
+        [
+            {"id": "vm-1001", "kind": "state_assertion", "from_tool": "list_alarms"},
+            {"id": "alarm-9003", "kind": "state_assertion", "from_tool": "list_alarms"},
+        ],
+        [{"tool_name": "list_alarms", "success": True, "data": [{
+            "id": "alarm-9003",
+            "name": "虚拟机内存不足",
+            "moi": "对象类型=虚拟机, 虚拟机ID=vm-1001, 主机URN=urn:sites:3F0A:hosts:178",
+        }]}],
+    )
+    assert grounded
+
+
+def test_burying_an_id_in_text_does_not_ground_one_the_tools_never_returned():
+    grounded, reason = verify_resource_claims(
+        "vm-7777 也受影响。",
+        [{"id": "vm-7777", "kind": "state_assertion", "from_tool": "list_alarms"}],
+        [{"tool_name": "list_alarms", "success": True, "data": [{
+            "id": "alarm-9003",
+            "moi": "对象类型=虚拟机, 虚拟机ID=vm-1001",
+        }]}],
+    )
+    assert not grounded
+    assert "vm-7777" in reason
+
+
+def test_numeric_ids_returned_unquoted_are_groundable():
+    # eDME returns host_id as a bare number; str-only collection would miss it.
+    grounded, _ = verify_resource_claims(
+        "该主机负载偏高。",
+        [{"id": "178", "kind": "state_assertion", "from_tool": "list_hosts"}],
+        [{"tool_name": "list_hosts", "success": True, "data": [{"host_id": 178}]}],
+    )
+    assert grounded
+
+
 # --- Tool gateway: RBAC / schema / audit -------------------------------------
 
 def test_tool_schema_rejects_invalid_parameters():

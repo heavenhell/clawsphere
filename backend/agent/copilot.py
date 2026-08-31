@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 import threading
 from time import perf_counter
 from typing import Any, Literal, TypedDict
@@ -42,6 +44,7 @@ from backend.memory.context_manager import (
     manage_context_window,
 )
 from backend.memory.database import memory_db
+from backend.memory.long_term import long_term_memory
 from backend.memory.retriever import retrieve_discovered_tools, retrieve_history, retrieve_tools
 from backend.memory.store import write_conversation_summary
 from backend.skills.loader import (
@@ -53,6 +56,8 @@ from backend.skills.loader import (
 from backend.observability import observe_agent
 from backend.agent.audit_log import log_grounding_rejection, log_session_turn
 
+
+LOGGER = logging.getLogger(__name__)
 
 # --- Configuration -----------------------------------------------------------
 # Death-loop / runaway guardrail: a single turn may execute at most this many
@@ -107,6 +112,8 @@ class CopilotState(TypedDict, total=False):
     execution_log: list[dict[str, Any]]
     final_response: str
     resource_claims: list[dict[str, Any]]
+    memory_note: dict[str, Any]
+    long_term_facts_written: list[str]
     response_source: str
     llm_available: bool
     step_budget_hit: bool
@@ -179,12 +186,18 @@ tool_search_candidates、route_decisions、retrieved_cases 等前序阶段的决
 - "resource_claims": 数组。回答里出现的每一个资源 ID(如 vm-1001、host-005、alarm-9001、edme-storage-002)都必须在此申报一条:
     - {{"id": "<资源ID>", "kind": "example"}}  用于举例说明或引用历史上下文,不断言其当前状态。
     - {{"id": "<资源ID>", "kind": "state_assertion", "from_tool": "<工具名>"}}  断言该资源的当前状态/数值,必须来自本轮某个工具结果。
+- "memory_note": 可选对象。仅当本轮出现了"工具查不到、但以后仍然有用"的信息时才填,否则整个字段省略。
+    - {{"type": "preference", "content": "..."}}  用户表达的运维偏好(如只关注 major 以上告警、变更窗口)。
+    - {{"type": "resource", "content": "..."}}    资源的人为约定或例外(如某集群是灾备、某VM待下线)。
 
 硬性要求:
 - 只能基于 tool_results 里的真实数据断言资源状态;严禁编造 tool_results 之外的资源、数值或状态。
 - 解释术语/概念时只讲原理,可引用历史对象举例(kind=example),但不要声称它们的当前状态。
+- search_session_history 返回的是**历史记录,不是当前状态**。引用它时必须写明距今时间(如"约 12 天前的处置记录"),
+  其中的资源 ID 只能用 kind=example,不能用 kind=state_assertion;要断言当前状态必须另外调用实时查询工具。
 - 写操作在审批前一律说明"已进入审批,未执行",不得声称已完成。
-- answer 中提到的每个资源 ID 都必须在 resource_claims 里出现,不得遗漏。"""
+- answer 中提到的每个资源 ID 都必须在 resource_claims 里出现,不得遗漏。
+- memory_note 只记结论、约定和偏好,不要把当前指标数值写进去——那些下次调用工具就能查到,存下来只会过期。"""
 
 TOOL_SEARCH_META_TOOL = [{
     "type": "function",
@@ -986,6 +999,55 @@ def _collect_ids(text: str) -> set[str]:
     return {item.lower() for item in RESOURCE_ID_PATTERN.findall(text)}
 
 
+def _collect_tool_strings(tool_results: list[dict[str, Any]]) -> set[str]:
+    """Every groundable token this turn's tool results actually contained.
+
+    Built once per turn for O(1) membership checks, replacing repeated
+    json.dumps of large lists plus substring scans over them. Two kinds of
+    entry go in, both lowercased so lookups stay case-insensitive:
+
+    - each string value verbatim, which grounds any ID format the tools return
+      as a field of its own (site-001, urn:..., hex ids, kylin-perf-1);
+    - every resource ID *embedded inside* a string value. Real platforms bury
+      ids in compound text — eDME's MOI reads
+      `对象类型=虚拟机, 虚拟机ID=vm-1001, 主机URN=urn:...:hosts:178`, and alarm
+      names carry them inline. Matching whole values only would reject an
+      answer whose id genuinely came from the tool, which is worse than the
+      over-matching it replaced: the model gets told to drop a true statement.
+    """
+    values: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, str):
+            lowered = node.lower()
+            values.add(lowered)
+            values.update(RESOURCE_ID_PATTERN.findall(lowered))
+        elif isinstance(node, dict):
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+        elif isinstance(node, (int, float)) and not isinstance(node, bool):
+            # Numeric ids (host_id: 178) are returned unquoted by eDME.
+            values.add(str(node).lower())
+
+    for result in tool_results:
+        walk(result.get("data"))
+    return values
+
+
+# Tools that return past observations rather than live platform state. Their
+# output must never ground a claim about what is true *now* — without this the
+# grounding check would happily let a three-month-old CPU reading through,
+# because the resource ID really does appear in this turn's tool_results.
+HISTORICAL_TOOLS = {"search_session_history"}
+
+
+def _live_tool_results(tool_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [item for item in tool_results if item.get("tool_name") not in HISTORICAL_TOOLS]
+
+
 def verify_resource_claims(
     answer: str,
     claims: list[dict[str, Any]],
@@ -999,24 +1061,27 @@ def verify_resource_claims(
     Anything else is a fabrication or an ungrounded history-state claim and is
     rejected. State-assertion claims must additionally be backed by tool data."""
     answer_ids = _collect_ids(answer)
-    # Text of this turn's tool results — substring lookup grounds any ID format
-    # the tools actually returned (site-001, pool ids, hex ids), not only those
-    # matched by the resource-ID pattern.
-    tool_text = json.dumps(tool_results, ensure_ascii=False).lower()
-    tool_ids = _collect_ids(json.dumps(tool_results, ensure_ascii=False))
+    # Only live results ground a claim; historical ones must be declared as
+    # `example` instead, which keeps the answer from asserting stale state.
+    live_results = _live_tool_results(tool_results)
+    # Set-based membership over everything the tools actually returned: whole
+    # field values plus the resource ids embedded in them. Built once per turn
+    # (O(1) lookups) — replaces json.dumps of the whole result set plus
+    # substring scans over it.
+    tool_values = _collect_tool_strings(live_results)
     example_ids = {
         str(c.get("id", "")).lower()
         for c in claims
         if c.get("kind") == "example" and c.get("id")
     }
     for answer_id in answer_ids:
-        if answer_id in tool_ids or answer_id in example_ids:
+        if answer_id in tool_values or answer_id in example_ids:
             continue
         return False, f"回答中出现无数据支撑的资源引用：{answer_id}"
     for claim in claims:
         if claim.get("kind") == "state_assertion":
             claim_id = str(claim.get("id", "")).lower()
-            if claim_id and claim_id not in tool_text:
+            if claim_id and claim_id not in tool_values:
                 return False, f"状态断言无工具数据支撑：{claim.get('id')}"
     return True, ""
 
@@ -1152,9 +1217,11 @@ def llm_responder(state: CopilotState) -> CopilotState:
             claims = []
         grounded, reason = verify_resource_claims(answer, claims, state.get("tool_results", []))
         if grounded:
+            note = parsed.get("memory_note")
             return {
                 "final_response": answer,
                 "resource_claims": claims,
+                "memory_note": note if isinstance(note, dict) else {},
                 "response_source": "deepseek",
                 "llm_status": get_public_llm_status(),
                 "fallback_reason": None,
@@ -1194,6 +1261,76 @@ def llm_responder(state: CopilotState) -> CopilotState:
         "llm_stage_metrics": stage_metrics,
         "route_decisions": route_decisions,
     }
+
+
+MEMORY_NOTE_TYPES = {"preference", "resource"}
+
+
+def _write_long_term_memory(state: CopilotState) -> list[str]:
+    """Persist what tools cannot replay: conclusions, effective (and ineffective)
+    actions, executed changes, and human conventions.
+
+    Deliberately NOT written: current metric values, inventories, alarm lists —
+    all one tool call away and stale the moment they are stored.
+
+    Trigger is split by who knows best. Executing a write tool and passing the
+    grounding check are deterministic facts the code observes directly, so code
+    decides those; whether the user just stated a lasting preference is a
+    semantic judgement, so the model raises it via `memory_note`. The model
+    never gets a save tool of its own — that would spend the turn's tool budget
+    and let it decide to persist arbitrary content.
+    """
+    # A rejected answer must never become a remembered "fact".
+    if state.get("response_source") != "deepseek":
+        return []
+
+    written: list[str] = []
+    common = {
+        "tenant_id": state["tenant_id"],
+        "user_id": state["user_id"],
+        "conversation_id": state["conversation_id"],
+    }
+    answer = (state.get("final_response") or "").strip()
+    description = re.split(r"[。\n]", answer)[0][:160] if answer else ""
+    claims = state.get("resource_claims") or []
+    resource_ids = [str(item.get("id")) for item in claims if item.get("id")]
+    executed = [item["tool_name"] for item in state.get("execution_log", []) if item.get("success")]
+    changed = [name for name in executed if _tool_risk(state, name) in {"medium", "high"}]
+
+    if changed:
+        fact = long_term_memory.remember(
+            **common, fact_type="change", description=description or f"执行了 {', '.join(changed)}",
+            body=answer, resource_ids=resource_ids, tools_used=changed, outcome="executed",
+        )
+        if fact:
+            written.append(fact.name)
+    elif resource_ids and any(item.get("kind") == "state_assertion" for item in claims):
+        # A grounded state assertion means this turn reached a real conclusion
+        # about a real resource — the diagnostic arc worth remembering. Repeated
+        # turns on the same resources update this same fact rather than
+        # fragmenting one investigation across five useless records.
+        fact = long_term_memory.remember(
+            **common, fact_type="incident", description=description, body=answer,
+            resource_ids=resource_ids,
+            tools_used=[
+                str(item["tool_name"]) for item in state.get("tool_results", [])
+                if item.get("tool_name")
+            ],
+            outcome="no_change",
+        )
+        if fact:
+            written.append(fact.name)
+
+    note = state.get("memory_note") or {}
+    if note.get("type") in MEMORY_NOTE_TYPES and str(note.get("content") or "").strip():
+        content = str(note["content"]).strip()
+        fact = long_term_memory.remember(
+            **common, fact_type=str(note["type"]), description=content,
+            body=content, resource_ids=resource_ids,
+        )
+        if fact:
+            written.append(fact.name)
+    return written
 
 
 def memory_writer(state: CopilotState) -> CopilotState:
@@ -1239,7 +1376,14 @@ def memory_writer(state: CopilotState) -> CopilotState:
         "plan": state.get("plan", []),
         "agent_step_count": state.get("agent_step_count", 0),
     })
-    return {"summary": turn_summary}
+    try:
+        remembered = _write_long_term_memory(state)
+    except Exception:
+        # Long-term memory is an enhancement; failing to record must never turn
+        # a successful answer into a failed turn.
+        LOGGER.exception("long-term memory write failed")
+        remembered = []
+    return {"summary": turn_summary, "long_term_facts_written": remembered}
 
 
 def error_handler(state: CopilotState) -> CopilotState:
@@ -1451,6 +1595,8 @@ def run_copilot(
             "hitl_approved": None,
             "final_response": "",
             "resource_claims": [],
+            "memory_note": {},
+            "long_term_facts_written": [],
             "response_source": "pending",
             "llm_available": True,
             "step_budget_hit": False,
