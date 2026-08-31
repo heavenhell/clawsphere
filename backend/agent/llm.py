@@ -367,7 +367,7 @@ def call_deepseek(system_prompt: str, user_prompt: str) -> str | None:
     return body["choices"][0]["message"].get("content")
 
 
-def call_deepseek_json(system_prompt: str, user_prompt: str, max_tokens: int = 1200) -> dict[str, Any] | None:
+def call_deepseek_json(system_prompt: str, user_prompt: str, max_tokens: int = 3000) -> dict[str, Any] | None:
     """Structured-output call. Returns the parsed JSON object the model emitted,
     or None when the LLM is not configured. Raises on transport failure so the
     caller can decide how to degrade. The schema is described in the prompt and
@@ -407,7 +407,7 @@ def call_deepseek_agent_plan(
         "tools": tools,
         "tool_choice": "auto",
         "temperature": 0,
-        "max_tokens": 1000,
+        "max_tokens": 3000,
     })
     if not body:
         return None
@@ -424,8 +424,20 @@ def call_deepseek_agent_plan(
 
 
 def summarize_messages(messages: list[dict[str, str]]) -> str | None:
+    """Fold a conversation segment into a rolling summary.
+
+    Input may start with a prior summary followed by the new segment; the two
+    must be merged, not concatenated. Called only when the conversation
+    overflows its token budget, so the output budget is generous — losing a
+    resource ID or an executed change here loses it permanently.
+    """
     return call_deepseek(
-        "你负责压缩运维对话。保留资源标识、告警编号、执行结论、用户偏好和待处理事项，不超过300 token。",
+        "你负责压缩运维对话。输入可能以“已有摘要”开头，后面是新增对话——请把两者合并成一份摘要，"
+        "不要简单拼接，也不要丢弃已有摘要里的信息。\n"
+        "必须逐字保留：资源标识（VM/主机/集群/存储/告警编号）、精确数值和阈值、已执行的变更及审批单号、"
+        "诊断结论及其依据、用户明确表达的偏好和约定、未完成事项。\n"
+        "可以丢弃：寒暄、重复的中间过程、可以重新调用工具查到的当前状态数值。\n"
+        "输出纯文本，不超过 2500 字。",
         json.dumps(messages, ensure_ascii=False),
     )
 

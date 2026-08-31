@@ -80,7 +80,7 @@ sequenceDiagram
 
 | 节点 | 文件位置 | 类型 | 职责 |
 |---|---|---|---|
-| `context_loader` | `copilot.py:305` | 宿主 | 上下文窗口管理（六轮滚动摘要），不变 |
+| `context_loader` | `copilot.py:305` | 宿主 | 上下文窗口管理（触发式水位压缩，见第四节之一） |
 | `history_retriever` | `copilot.py:334` | 宿主 | 仅检索历史案例（`retrieve_history`），不再检索 Skill |
 | `skill_router` | `copilot.py:403` | **LLM1** | 角色过滤后的 Skill 一句话目录 + 工具 tier1 目录 → `{decision, skill_ids, ...}` |
 | `skill_loader` | `copilot.py:347` | 宿主 | 按 `skill_id` 精确加载完整内容，二次角色校验 |
@@ -101,7 +101,8 @@ sequenceDiagram
 
 ```text
 会话/身份            message, task_id, conversation_id, user_id, user_roles, tenant_id
-上下文               conversation_summary, recent_messages, relevant_messages, working_context
+上下文               conversation_summary, summarized_upto_id, context_compacted,
+                    recent_messages, relevant_messages, working_context
 历史检索             retrieved_cases
 Skill 决策链         skill_decision, selected_skill_ids, loaded_skills, skill_catalog_version
 工具检索链           tool_search_request, tool_search_candidates, selected_tool_schemas, tool_catalog_version
@@ -110,6 +111,32 @@ Skill 决策链         skill_decision, selected_skill_ids, loaded_skills, skill
 观测                 route_decisions, plan, plan_source, llm_stage_metrics, fallback_reason
 输出                 final_response, resource_claims, response_source
 ```
+
+### 四之一、上下文 token 预算与触发式压缩
+
+`context_manager.py` 的压缩是**触发式**的，不是每轮执行：
+
+| 常量 | 值 | 含义 |
+|---|---|---|
+| `TOKEN_THRESHOLD` | 9400 | 会话总量超过它才触发压缩 |
+| `HISTORY_TARGET_TOKENS` | 5400 | 压缩后落到的总量 |
+| `PRESERVE_RECENT_TOKENS` | 1400 | 尾部逐字保留，永不折叠进摘要 |
+| `SUMMARY_TOKEN_BUDGET` | 4000 | = TARGET − PRESERVE |
+| `CROSS_SESSION_TOKEN_BUDGET` | 800 | 预留给长期记忆召回，与会话内预算互不挤占 |
+
+三级流水：新消息进**逐字区**（保底 1400）→ 溢出滚入**待压缩区**（仍是原文，照常送模型）→ 总量破 9400 时折叠进**摘要区**。所以 1400 不是"只保留 1400"，而是"压缩时至少保留 1400"；日常状态下原文可以一直涨到 9400。
+
+压缩后可再增长 `9400 − 5400 = 4000` token 才会再次触发，因此压缩之间有充分间隔，不会每轮反复触发。
+
+**水位（`conversations.summarized_upto_id`）** 是已折叠进摘要的最大 `conversation_messages.id`。`load_conversation` 只取 `id > 水位` 的消息，所以：
+
+- 摘要**单调向前**——已压缩的段落不再从原文重算，输入是"旧摘要 + 新增消息"，成本从 O(历史长度) 降到 O(增量)；
+- 历史长度由压缩周期决定而非固定截断，早期消息不会像旧的 `LIMIT 100` 那样被静默丢弃；
+- 只有真正压缩的那一轮才写水位（`append_turn(summarized_upto_id=...)`，SQL 用 `max()` 保证不回退）。
+
+压缩器失败（异常、返回空）时**退回全量携带且不推进水位**，下一轮重试——一次本地压缩失败不应让用户的提问整个失败，更不应静默丢上下文。
+
+实测：40 轮长会话共触发 1 次压缩（旧实现约 37 次）。回归测试见 `tests/test_memory.py` 的 `test_short_conversation_is_carried_verbatim_without_calling_the_summarizer`、`test_watermark_advances_only_when_compaction_runs`、`test_compaction_failure_falls_back_to_full_history_without_advancing_watermark`。
 
 `plan`（`list[str]`）是跨阶段**累加**的人类可读原因链（Skill 选择原因 → 工具检索原因 → 工具调用原因），前端渲染成 chip 列表；`route_decisions` 是结构化版本，`skill_router`/`tool_search_planner`/`tool_call_planner` 三个规划节点的每条返回分支都会追加一条 `{stage, decision, reason, detail?}` 记录（`_route_entry()`，`copilot.py`），一一对应 `plan` 累加的同一组决策点。回归测试：`test_route_decisions_records_one_structured_entry_per_planning_stage`、`test_route_decisions_records_single_entry_on_direct_answer_short_circuit`。
 

@@ -147,6 +147,12 @@ class MemoryDatabase:
             self._add_column_if_missing(connection, "execution_logs", "user_id", "TEXT NOT NULL DEFAULT 'legacy-user'")
             self._add_column_if_missing(connection, "execution_logs", "tenant_id", "TEXT NOT NULL DEFAULT 'legacy-tenant'")
             self._add_column_if_missing(connection, "approvals", "resume_required", "INTEGER NOT NULL DEFAULT 1")
+            # Highest conversation_messages.id already folded into
+            # conversations.summary. Messages at or below it are represented by
+            # the summary and are no longer loaded verbatim.
+            self._add_column_if_missing(
+                connection, "conversations", "summarized_upto_id", "INTEGER NOT NULL DEFAULT 0"
+            )
             connection.execute(
                 """
                 UPDATE approvals SET resume_required = 0
@@ -210,7 +216,19 @@ class MemoryDatabase:
             ).fetchone()
         return dict(row) if row else None
 
-    def append_turn(self, conversation_id: str, user_id: str, tenant_id: str, user_message: str, answer: str, summary: str) -> None:
+    def append_turn(
+        self,
+        conversation_id: str,
+        user_id: str,
+        tenant_id: str,
+        user_message: str,
+        answer: str,
+        summary: str,
+        summarized_upto_id: int | None = None,
+    ) -> None:
+        """Persist one turn. `summarized_upto_id` is only written when compaction
+        ran this turn; passing None leaves the stored watermark untouched so a
+        non-compacting turn can never rewind it."""
         now = datetime.now(timezone.utc).isoformat()
         with self._lock, self.connect() as connection:
             owner = connection.execute(
@@ -220,11 +238,16 @@ class MemoryDatabase:
                 raise PermissionError("conversation does not belong to caller")
             connection.execute(
                 """
-                INSERT INTO conversations(id, user_id, tenant_id, summary, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET summary=excluded.summary, updated_at=excluded.updated_at
+                INSERT INTO conversations(id, user_id, tenant_id, summary, summarized_upto_id, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    summary=excluded.summary,
+                    summarized_upto_id=max(
+                        conversations.summarized_upto_id, excluded.summarized_upto_id
+                    ),
+                    updated_at=excluded.updated_at
                 """,
-                (conversation_id, user_id, tenant_id, summary, now),
+                (conversation_id, user_id, tenant_id, summary, int(summarized_upto_id or 0), now),
             )
             connection.executemany(
                 "INSERT INTO conversation_messages(conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)",
@@ -236,11 +259,21 @@ class MemoryDatabase:
         conversation_id: str,
         user_id: str,
         tenant_id: str,
-        limit: int = 100,
-    ) -> tuple[list[dict[str, str]], str]:
+        limit: int = 500,
+    ) -> tuple[list[dict[str, Any]], str, int]:
+        """Return (messages_after_watermark, rolling_summary, watermark).
+
+        Only messages the summary does not already cover are loaded, so history
+        length is bounded by the compaction cycle rather than by a fixed cutoff.
+        `limit` is a runaway guard for conversations written before the
+        watermark existed, not the normal path.
+        """
         with self.connect() as connection:
             session = connection.execute(
-                "SELECT summary FROM conversations WHERE id = ? AND user_id = ? AND tenant_id = ?",
+                """
+                SELECT summary, summarized_upto_id FROM conversations
+                WHERE id = ? AND user_id = ? AND tenant_id = ?
+                """,
                 (conversation_id, user_id, tenant_id),
             ).fetchone()
             existing = connection.execute(
@@ -248,19 +281,23 @@ class MemoryDatabase:
             ).fetchone()
             if existing and not session:
                 raise PermissionError("conversation does not belong to caller")
+            watermark = int(session["summarized_upto_id"]) if session else 0
             rows = connection.execute(
                 """
-                SELECT role, content FROM conversation_messages
-                WHERE conversation_id = ? AND EXISTS (
+                SELECT id, role, content FROM conversation_messages
+                WHERE conversation_id = ? AND id > ? AND EXISTS (
                     SELECT 1 FROM conversations
                     WHERE id = ? AND user_id = ? AND tenant_id = ?
                 )
                 ORDER BY id DESC LIMIT ?
                 """,
-                (conversation_id, conversation_id, user_id, tenant_id, limit),
+                (conversation_id, watermark, conversation_id, user_id, tenant_id, limit),
             ).fetchall()
-        history = [{"role": row["role"], "content": row["content"]} for row in reversed(rows)]
-        return history, session["summary"] if session else ""
+        history = [
+            {"id": row["id"], "role": row["role"], "content": row["content"]}
+            for row in reversed(rows)
+        ]
+        return history, session["summary"] if session else "", watermark
 
     def write_memory(
         self,

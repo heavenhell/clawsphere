@@ -4,6 +4,7 @@ from backend.app import app
 from backend.mcp.schemas import ToolRequest
 from backend.agent.copilot import verify_resource_claims
 from backend.mcp.tools import TOOL_REGISTRY, call_tool
+from backend.memory.context_manager import TOKEN_THRESHOLD
 from backend.memory.database import memory_db
 import backend.app as app_module
 
@@ -200,9 +201,12 @@ def test_chat_trace_exposes_structured_context_metrics():
     )
     assert response.status_code == 200
     context = response.json()["context"]
-    assert context["schema_version"] == 2
+    assert context["schema_version"] == 3
     assert context["working_context"]["active_resource_ids"] == ["vm-1001"]
-    assert context["estimated_tokens"] <= 3000
+    assert context["estimated_tokens"] <= TOKEN_THRESHOLD
+    # A single-turn conversation is nowhere near the threshold, so the trace
+    # must show that no compaction was spent on it.
+    assert context["compacted"] is False
 
 
 def test_chat_rejects_oversized_message_before_agent_execution():

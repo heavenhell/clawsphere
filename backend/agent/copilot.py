@@ -73,6 +73,8 @@ class CopilotState(TypedDict, total=False):
     user_roles: list[str]
     tenant_id: str
     conversation_summary: str
+    summarized_upto_id: int
+    context_compacted: bool
     recent_messages: list[dict[str, str]]
     relevant_messages: list[dict[str, str]]
     working_context: dict[str, Any]
@@ -342,7 +344,7 @@ def _skill_router_payload(state: CopilotState) -> str:
 
 def _call_skill_router(payload: str) -> dict[str, Any] | None:
     try:
-        return call_deepseek_json(SKILL_ROUTER_PROMPT, payload, max_tokens=600)
+        return call_deepseek_json(SKILL_ROUTER_PROMPT, payload, max_tokens=3000)
     except Exception:
         return None
 
@@ -457,6 +459,7 @@ def context_loader(state: CopilotState) -> CopilotState:
         state.get("conversation_summary", ""),
         summarizer,
         current_message=state["message"],
+        watermark=state.get("summarized_upto_id", 0),
     )
     return {
         "recent_messages": context["recent_messages"],
@@ -467,8 +470,12 @@ def context_loader(state: CopilotState) -> CopilotState:
             "older_message_count": context["older_message_count"],
             "relevant_message_count": len(context["relevant_messages"]),
             "estimated_tokens": context["estimated_tokens"],
+            "compacted": context["compacted"],
+            "compaction_skipped_reason": context["compaction_skipped_reason"],
         },
         "conversation_summary": context["conversation_summary"],
+        "summarized_upto_id": context["new_watermark"],
+        "context_compacted": context["compacted"],
         "resource_snapshot": None,
         "alert_payload": None,
     }
@@ -1205,6 +1212,11 @@ def memory_writer(state: CopilotState) -> CopilotState:
         state["message"],
         state.get("final_response", ""),
         state.get("conversation_summary", ""),
+        # Only advance the stored watermark on a turn that actually compacted;
+        # otherwise leave it where it was.
+        summarized_upto_id=(
+            state.get("summarized_upto_id", 0) if state.get("context_compacted") else None
+        ),
     )
     # Persist a sanitized turn record (normal answers included) so a
     # conversation can be investigated or replayed from disk later.
@@ -1390,7 +1402,9 @@ def run_copilot(
         pending = approval_store.get_pending_for_conversation(conversation_id, user_id, tenant_id)
         if pending:
             raise PendingApprovalError(pending["id"])
-        stored_messages, stored_summary = memory_db.load_conversation(conversation_id, user_id, tenant_id)
+        stored_messages, stored_summary, stored_watermark = memory_db.load_conversation(
+            conversation_id, user_id, tenant_id
+        )
         task_id = str(uuid4())
         config = {"configurable": {"thread_id": task_id}}
         state = get_graph().invoke({
@@ -1403,6 +1417,8 @@ def run_copilot(
             "user_roles": roles or ["readonly"],
             "tenant_id": tenant_id,
             "conversation_summary": stored_summary,
+            "summarized_upto_id": stored_watermark,
+            "context_compacted": False,
             "recent_messages": [],
             "relevant_messages": [],
             "working_context": {},
