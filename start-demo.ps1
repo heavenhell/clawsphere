@@ -2,7 +2,15 @@ $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
-$Pnpm = "C:\Users\chen\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\fallback\pnpm.cmd"
+$PnpmCommand = Get-Command pnpm.cmd -ErrorAction SilentlyContinue
+if ($PnpmCommand) {
+  $PackageManager = $PnpmCommand.Source
+  $FrontendArguments = @("dev", "--host", "127.0.0.1", "--port", "5174")
+} else {
+  $NpmCommand = Get-Command npm.cmd -ErrorAction Stop
+  $PackageManager = $NpmCommand.Source
+  $FrontendArguments = @("run", "dev", "--", "--host", "127.0.0.1", "--port", "5174")
+}
 
 $env:PYTHONPATH = $Root
 
@@ -13,8 +21,8 @@ Start-Process -FilePath $Python `
   -RedirectStandardOutput (Join-Path $Root "backend.out.log") `
   -RedirectStandardError (Join-Path $Root "backend.err.log")
 
-Start-Process -FilePath $Pnpm `
-  -ArgumentList @("dev", "--host", "127.0.0.1", "--port", "5174") `
+Start-Process -FilePath $PackageManager `
+  -ArgumentList $FrontendArguments `
   -WorkingDirectory (Join-Path $Root "frontend") `
   -WindowStyle Hidden `
   -RedirectStandardOutput (Join-Path $Root "frontend.out.log") `
