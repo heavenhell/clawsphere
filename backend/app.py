@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+import logging
 from contextlib import asynccontextmanager
+from typing import Callable, TypeVar
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from time import perf_counter
 
 from backend.agent.copilot import (
@@ -16,17 +19,30 @@ from backend.agent.copilot import (
     run_copilot,
 )
 from backend.agent.llm import get_public_llm_status
+from backend.adapters.edme import PlatformAuthExpiredError
 from backend.guardrails.approvals import approval_store
 from backend.guardrails.chat_limits import chat_limiter
 from backend.mcp.auth import DEMO_MODE, AuthContext, get_auth_context, issue_demo_token
+from backend.mcp.gateway import get_tool_gateway
 from backend.memory.store import list_memory_writes
 from backend.memory.database import memory_db
 from backend.mcp.schemas import GatewayToolRequest, ToolRequest
-from backend.mcp.tools import TOOL_REGISTRY, call_tool
+from backend.mcp.tools import TOOL_REGISTRY
 from backend.mock.api import router as mock_router
-from backend.providers import repo, runtime_config
-from backend.observability import APPROVAL_DECISIONS, HTTP_LATENCY, HTTP_REQUESTS, INTENT_COUNT, create_metrics_app
+from backend.platform_sessions import PlatformSessionRateLimitError, platform_session_broker
+from backend.providers import delegated_edme_repository, repo, runtime_config, use_repository
+from backend.observability import (
+    APPROVAL_DECISIONS,
+    HTTP_LATENCY,
+    HTTP_REQUESTS,
+    INTENT_COUNT,
+    MCP_CLIENT_EVENTS,
+    create_metrics_app,
+)
 from backend.memory.retriever import ensure_knowledge_seeded
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ChatRequest(BaseModel):
@@ -42,6 +58,13 @@ class DemoTokenRequest(BaseModel):
     tenant_id: str = "demo-tenant"
 
 
+class EdmePlatformSessionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=1, max_length=256)
+    password: SecretStr = Field(min_length=1, max_length=1024)
+
+
 class ApprovalDecisionRequest(BaseModel):
     approved: bool
     reason: str = ""
@@ -52,6 +75,7 @@ async def lifespan(_app: FastAPI):
     ensure_knowledge_seeded()
     get_graph()
     yield
+    platform_session_broker.clear()
     close_graph_runtime()
 
 
@@ -105,8 +129,14 @@ def llm_status(_auth: AuthContext = Depends(get_auth_context)):
 
 
 @app.get("/api/overview")
-def overview():
-    return repo.overview()
+def overview(auth: AuthContext = Depends(get_auth_context)):
+    # Resolve the repository proxy only after the per-request context is set.
+    return _with_client_platform(
+        auth,
+        lambda: repo.overview(),
+        retry_on_auth_expiry=True,
+        operation_name="overview",
+    )
 
 
 @app.get("/api/platform-status")
@@ -135,16 +165,112 @@ def demo_token(request: DemoTokenRequest):
     return {"access_token": issue_demo_token(request.user_id, request.roles, request.tenant_id), "token_type": "bearer"}
 
 
+@app.post("/api/platform-sessions/edme")
+def connect_edme(
+    request: EdmePlatformSessionRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
+    try:
+        session = platform_session_broker.register_edme(
+            auth,
+            request.username,
+            request.password.get_secret_value(),
+        )
+    except PlatformSessionRateLimitError:
+        raise HTTPException(
+            status_code=429,
+            detail="eDME 登录请求过于频繁，请稍后重试",
+            headers={"Retry-After": "2"},
+        ) from None
+    except httpx.HTTPStatusError as exc:
+        status = 401 if exc.response.status_code in {401, 403} else 502
+        detail = "eDME 业务账号或密码无效" if status == 401 else "eDME 登录接口返回异常"
+        raise HTTPException(status_code=status, detail=detail) from None
+    except httpx.RequestError:
+        raise HTTPException(status_code=502, detail="无法连接 eDME 登录接口") from None
+    except (RuntimeError, ValueError):
+        raise HTTPException(status_code=503, detail="eDME 客户端委托鉴权当前不可用") from None
+    return session.public_status()
+
+
+@app.get("/api/platform-sessions/edme")
+def edme_session_status(auth: AuthContext = Depends(get_auth_context)):
+    # Reports the state after any configured single-tenant bootstrap, so the
+    # answer matches what a tool call would actually get. A bootstrap that
+    # cannot log in is reported here rather than raised: a misconfigured
+    # credential is exactly what this endpoint exists to reveal.
+    try:
+        session = platform_session_broker.ensure_session(auth)
+    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+        return {"platform_id": "edme", "connected": False, "error": str(exc)}
+    return session.public_status() if session else {"platform_id": "edme", "connected": False}
+
+
+@app.delete("/api/platform-sessions/edme")
+def disconnect_edme(auth: AuthContext = Depends(get_auth_context)):
+    return {"platform_id": "edme", "connected": False, "revoked": platform_session_broker.revoke(auth)}
+
+
+T = TypeVar("T")
+
+
+def _with_client_platform(
+    auth: AuthContext,
+    operation: Callable[[], T],
+    *,
+    retry_on_auth_expiry: bool = False,
+    operation_name: str = "direct_api",
+) -> T:
+    if not runtime_config.edme.client_delegated:
+        return operation()
+    session = platform_session_broker.ensure_session(auth)
+    if session is None:
+        raise HTTPException(status_code=409, detail="当前用户尚未连接 eDME")
+
+    def execute(access_session: str) -> T:
+        repository = delegated_edme_repository(access_session)
+        try:
+            with use_repository(repository):
+                return operation()
+        finally:
+            repository.close()
+
+    try:
+        return execute(session.access_session)
+    except PlatformAuthExpiredError:
+        if not retry_on_auth_expiry:
+            raise
+        try:
+            refreshed = platform_session_broker.refresh(
+                auth,
+                stale_session_id=session.session_id,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="eDME 平台认证刷新失败") from exc
+        MCP_CLIENT_EVENTS.labels("platform_auth_read_retried").inc()
+        LOGGER.info("platform_auth_read_retried route=%s", operation_name)
+        try:
+            return execute(refreshed.access_session)
+        except PlatformAuthExpiredError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="eDME 平台认证刷新后仍然失效",
+            ) from exc
+
+
 @app.post("/api/tools/call")
 def tool_call(request: GatewayToolRequest, auth: AuthContext = Depends(get_auth_context)):
-    return call_tool(ToolRequest(
+    tool_request = ToolRequest(
         tool_name=request.tool_name,
         params=request.params,
         task_id=request.task_id,
         caller_user_id=auth.user_id,
         caller_roles=auth.roles,
         tenant_id=auth.tenant_id,
-    ))
+    )
+    gateway = get_tool_gateway()
+    snapshot = gateway.catalog(auth)
+    return gateway.call(tool_request, snapshot.version)
 
 
 @app.post("/api/chat")

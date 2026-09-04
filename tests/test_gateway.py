@@ -1,11 +1,14 @@
 from fastapi.testclient import TestClient
 
+from backend.adapters.edme import PlatformPermissionDeniedError
 from backend.app import app
 from backend.mcp.schemas import ToolRequest
 from backend.agent.copilot import verify_resource_claims
 from backend.mcp.tools import TOOL_REGISTRY, call_tool
+from backend.memory.context_manager import TOKEN_THRESHOLD
 from backend.memory.database import memory_db
 import backend.app as app_module
+import backend.mcp.tools as tools_module
 
 
 client = TestClient(app)
@@ -119,6 +122,52 @@ def test_undeclared_resource_in_answer_is_rejected():
     assert "host-005" in reason
 
 
+def test_an_id_buried_in_a_tool_text_field_still_grounds():
+    """Real platforms return ids inside compound text, not only as own fields.
+
+    eDME's alarm MOI is one string carrying the object type, name and URN, and
+    alarm names mention the resource inline. Matching whole field values only
+    would reject an answer whose id genuinely came from this turn's tool — the
+    model would be told to retract a true statement.
+    """
+    grounded, _ = verify_resource_claims(
+        "vm-1001 当前内存不足，由 alarm-9003 上报。",
+        [
+            {"id": "vm-1001", "kind": "state_assertion", "from_tool": "list_alarms"},
+            {"id": "alarm-9003", "kind": "state_assertion", "from_tool": "list_alarms"},
+        ],
+        [{"tool_name": "list_alarms", "success": True, "data": [{
+            "id": "alarm-9003",
+            "name": "虚拟机内存不足",
+            "moi": "对象类型=虚拟机, 虚拟机ID=vm-1001, 主机URN=urn:sites:DEMO:hosts:178",
+        }]}],
+    )
+    assert grounded
+
+
+def test_burying_an_id_in_text_does_not_ground_one_the_tools_never_returned():
+    grounded, reason = verify_resource_claims(
+        "vm-7777 也受影响。",
+        [{"id": "vm-7777", "kind": "state_assertion", "from_tool": "list_alarms"}],
+        [{"tool_name": "list_alarms", "success": True, "data": [{
+            "id": "alarm-9003",
+            "moi": "对象类型=虚拟机, 虚拟机ID=vm-1001",
+        }]}],
+    )
+    assert not grounded
+    assert "vm-7777" in reason
+
+
+def test_numeric_ids_returned_unquoted_are_groundable():
+    # eDME returns host_id as a bare number; str-only collection would miss it.
+    grounded, _ = verify_resource_claims(
+        "该主机负载偏高。",
+        [{"id": "178", "kind": "state_assertion", "from_tool": "list_hosts"}],
+        [{"tool_name": "list_hosts", "success": True, "data": [{"host_id": 178}]}],
+    )
+    assert grounded
+
+
 # --- Tool gateway: RBAC / schema / audit -------------------------------------
 
 def test_tool_schema_rejects_invalid_parameters():
@@ -156,6 +205,28 @@ def test_tool_audit_is_persisted():
     response = call_tool(_tool_request("list_alarms", {}, "audit-test"))
     records = memory_db.list_tool_audit(20)
     assert any(item["audit_id"] == response.audit_id and item["task_id"] == "audit-test" for item in records)
+
+
+def test_edme_403_returns_permission_denied_and_is_audited(monkeypatch):
+    def deny(*_args, **_kwargs):
+        raise PlatformPermissionDeniedError("vendor payload must not escape")
+
+    monkeypatch.setattr(tools_module.repo, "edme_resource_instances", deny)
+    response = call_tool(_tool_request(
+        "query_edme_resources",
+        {},
+        "audit-edme-permission-denied",
+    ))
+
+    assert response.success is False
+    assert response.error_code == "PERMISSION_DENIED"
+    assert response.error_msg == "当前 eDME 业务账号权限不足"
+    records = memory_db.list_tool_audit(50, "gateway-test-tenant")
+    assert any(
+        item["audit_id"] == response.audit_id
+        and item["error_code"] == "PERMISSION_DENIED"
+        for item in records
+    )
 
 
 def test_prometheus_metrics_are_exposed():
@@ -200,9 +271,12 @@ def test_chat_trace_exposes_structured_context_metrics():
     )
     assert response.status_code == 200
     context = response.json()["context"]
-    assert context["schema_version"] == 2
+    assert context["schema_version"] == 3
     assert context["working_context"]["active_resource_ids"] == ["vm-1001"]
-    assert context["estimated_tokens"] <= 3000
+    assert context["estimated_tokens"] <= TOKEN_THRESHOLD
+    # A single-turn conversation is nowhere near the threshold, so the trace
+    # must show that no compaction was spent on it.
+    assert context["compacted"] is False
 
 
 def test_chat_rejects_oversized_message_before_agent_execution():
@@ -224,3 +298,28 @@ def test_chat_rate_limit_returns_429_before_agent_execution(monkeypatch):
         json={"message": "查询资源"},
     )
     assert response.status_code == 429
+
+
+def test_a_metric_value_cannot_ground_a_claim_about_a_resource():
+    """Numeric ids must be groundable; numeric measurements must not be.
+
+    eDME returns `host_id: 178` unquoted, so numbers have to count as evidence —
+    but only from a field that names an identifier. Otherwise any metric value
+    in the payload (memory_mb: 8192) would satisfy a state assertion about a
+    resource called "8192".
+    """
+    tool_results = [{
+        "tool_name": "list_hosts", "success": True,
+        "data": [{"host_id": 178, "memory_mb": 8192, "cpu_usage": 0.58}],
+    }]
+
+    grounded, _ = verify_resource_claims(
+        "该主机负载偏高。", [{"id": "178", "kind": "state_assertion"}], tool_results
+    )
+    assert grounded
+
+    grounded, reason = verify_resource_claims(
+        "该主机负载偏高。", [{"id": "8192", "kind": "state_assertion"}], tool_results
+    )
+    assert not grounded
+    assert "8192" in reason

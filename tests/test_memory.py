@@ -1,7 +1,13 @@
 import json
 from inspect import signature
 
-from backend.memory.context_manager import TOKEN_THRESHOLD, estimate_tokens, manage_context_window
+from backend.memory.context_manager import (
+    HISTORY_TARGET_TOKENS,
+    PRESERVE_RECENT_TOKENS,
+    TOKEN_THRESHOLD,
+    estimate_tokens,
+    manage_context_window,
+)
 from backend.memory.database import MemoryDatabase
 from backend.memory.retriever import retrieve, retrieve_history, retrieve_tools
 from backend.mcp.tools import TOOL_REGISTRY, tool_catalog_tier1
@@ -18,17 +24,103 @@ import backend.agent.copilot as copilot
 from backend.agent.copilot import run_copilot, skill_loader, tool_catalog_search
 
 
-def test_context_keeps_six_turns_and_compresses_older_messages():
+def _long_history(turns: int, chars_per_message: int = 300, prefix: str = ""):
+    """Build a history whose size is predictable in estimated tokens (CJK is
+    counted per character), so tests can sit deliberately above or below
+    TOKEN_THRESHOLD."""
+    history = []
+    for index in range(turns):
+        history.extend([
+            {"role": "user", "content": f"{prefix}第{index}轮问题：" + "容量告警排查记录。" * (chars_per_message // 9)},
+            {"role": "assistant", "content": f"第{index}轮结论：" + "已核实并持续观察。" * (chars_per_message // 9)},
+        ])
+    return history
+
+
+def test_short_conversation_is_carried_verbatim_without_calling_the_summarizer():
     history = []
     for index in range(8):
         history.extend([
             {"role": "user", "content": f"第 {index} 轮问题"},
             {"role": "assistant", "content": f"第 {index} 轮回答"},
         ])
+    calls = []
+
+    def tracking_summarizer(messages):
+        calls.append(messages)
+        return "不该被调用"
+
+    context = manage_context_window(history, summarizer=tracking_summarizer)
+
+    # The whole point of triggered compaction: a short conversation costs zero
+    # summarizer calls and loses nothing.
+    assert calls == []
+    assert context["compacted"] is False
+    assert len(context["recent_messages"]) == len(history)
+    assert context["older_message_count"] == 0
+    assert context["conversation_summary"] == ""
+
+
+def test_compaction_fires_once_the_conversation_exceeds_the_threshold():
+    history = _long_history(turns=20)
+    assert estimate_tokens(history) > TOKEN_THRESHOLD
+
+    context = manage_context_window(history, summarizer=lambda messages: "压缩后的摘要")
+
+    assert context["compacted"] is True
+    assert context["older_message_count"] > 0
+    assert context["conversation_summary"] == "压缩后的摘要"
+    assert estimate_tokens(context["recent_messages"]) <= PRESERVE_RECENT_TOKENS
+    assert context["estimated_tokens"] <= HISTORY_TARGET_TOKENS
+
+
+def test_compaction_merges_the_previous_summary_instead_of_recomputing_it():
+    history = _long_history(turns=20)
+    seen = {}
+
+    def summarizer(messages):
+        seen["payload"] = messages
+        return "合并后的摘要"
+
+    manage_context_window(history, existing_summary="上一轮的摘要", summarizer=summarizer)
+
+    # The prior summary must enter as input, not be silently discarded.
+    assert "上一轮的摘要" in seen["payload"][0]["content"]
+
+
+def test_watermark_advances_only_when_compaction_runs():
+    short = [{"id": index, "role": "user", "content": f"短消息{index}"} for index in range(4)]
+    context = manage_context_window(short, watermark=7, summarizer=lambda m: "x")
+    assert context["new_watermark"] == 7
+
+    history = [
+        {"id": index, "role": "user" if index % 2 == 0 else "assistant", "content": "容量告警排查记录。" * 40}
+        for index in range(40)
+    ]
+    context = manage_context_window(history, watermark=7, summarizer=lambda m: "摘要")
+    assert context["new_watermark"] > 7
+    assert context["new_watermark"] == history[context["older_message_count"] - 1]["id"]
+
+
+def test_compaction_failure_falls_back_to_full_history_without_advancing_watermark():
+    history = _long_history(turns=20)
+
+    def failing_summarizer(messages):
+        raise RuntimeError("compressor unavailable")
+
+    context = manage_context_window(history, watermark=3, summarizer=failing_summarizer)
+
+    # Losing the compressor must never lose context or fail the turn.
+    assert context["compacted"] is False
+    assert context["compaction_skipped_reason"] == "compaction_failed"
+    assert len(context["recent_messages"]) == len(history)
+    assert context["new_watermark"] == 3
+
+
+def test_message_ids_never_reach_the_model():
+    history = [{"id": 1, "role": "user", "content": "查询 vm-1001"}]
     context = manage_context_window(history)
-    assert len(context["recent_messages"]) == 12
-    assert context["older_message_count"] == 4
-    assert "第 0 轮问题" in context["conversation_summary"]
+    assert context["recent_messages"] == [{"role": "user", "content": "查询 vm-1001"}]
 
 
 def test_skill_loader_has_three_progressive_tiers():
@@ -135,9 +227,45 @@ def test_conversation_survives_database_reopen(tmp_path):
     first = MemoryDatabase(path)
     first.append_turn("c-1", "u-1", "t-1", "问题", "回答", "摘要")
     second = MemoryDatabase(path)
-    history, summary = second.load_conversation("c-1", "u-1", "t-1")
+    history, summary, watermark = second.load_conversation("c-1", "u-1", "t-1")
     assert summary == "摘要"
-    assert history[-1] == {"role": "assistant", "content": "回答"}
+    assert watermark == 0
+    assert history[-1]["role"] == "assistant"
+    assert history[-1]["content"] == "回答"
+
+
+def test_watermark_persists_and_hides_already_summarized_messages(tmp_path):
+    database = MemoryDatabase(tmp_path / "watermark.db")
+    database.append_turn("c-2", "u-1", "t-1", "第一轮问题", "第一轮回答", "")
+    history, _, _ = database.load_conversation("c-2", "u-1", "t-1")
+    first_turn_last_id = history[-1]["id"]
+
+    database.append_turn(
+        "c-2", "u-1", "t-1", "第二轮问题", "第二轮回答", "已压缩摘要",
+        summarized_upto_id=first_turn_last_id,
+    )
+    history, summary, watermark = database.load_conversation("c-2", "u-1", "t-1")
+
+    assert watermark == first_turn_last_id
+    assert summary == "已压缩摘要"
+    # Everything at or below the watermark is represented by the summary only.
+    assert [item["content"] for item in history] == ["第二轮问题", "第二轮回答"]
+
+
+def test_non_compacting_turn_never_rewinds_the_watermark(tmp_path):
+    database = MemoryDatabase(tmp_path / "no-rewind.db")
+    database.append_turn("c-3", "u-1", "t-1", "问题一", "回答一", "")
+    history, _, _ = database.load_conversation("c-3", "u-1", "t-1")
+    database.append_turn(
+        "c-3", "u-1", "t-1", "问题二", "回答二", "摘要",
+        summarized_upto_id=history[-1]["id"],
+    )
+    _, _, advanced = database.load_conversation("c-3", "u-1", "t-1")
+
+    database.append_turn("c-3", "u-1", "t-1", "问题三", "回答三", "摘要")
+    _, _, after = database.load_conversation("c-3", "u-1", "t-1")
+
+    assert after == advanced
 
 
 def test_conversation_isolated_by_user_and_tenant(tmp_path):
@@ -155,26 +283,26 @@ def test_conversation_isolated_by_user_and_tenant(tmp_path):
         pass
 
 
-def test_agent_returns_rolling_summary_after_six_turns():
+def test_agent_carries_short_conversations_without_producing_a_summary():
     conversation_id = "summary-test"
     for index in range(8):
         run_copilot(f"查询第 {index} 轮资源", conversation_id=conversation_id)
     result = run_copilot("有多少虚拟机", conversation_id=conversation_id)
-    assert "查询第 0 轮资源" in result["summary"]
-    assert len(result["summary"]) <= 1200
+    # Eight short turns sit far below the threshold, so nothing is compacted
+    # and no summarizer call was spent.
+    assert result["summary"] == ""
+    assert result["context"]["compacted"] is False
 
 
 def test_chinese_token_estimate_and_summary_boundary():
     messages = [{"role": "user", "content": "这是十个中文字符测试文本"}]
     assert estimate_tokens(messages) >= 10
-    long_history = []
-    for index in range(20):
-        long_history.extend([
-            {"role": "user", "content": f"第{index}轮：" + "容量告警处理记录。" * 20},
-            {"role": "assistant", "content": f"第{index}轮结论：已核实。"},
-        ])
+    long_history = _long_history(turns=24)
     context = manage_context_window(long_history)
-    assert len(context["conversation_summary"]) <= 1200
+    assert context["compacted"] is True
+    assert estimate_tokens([
+        {"role": "system", "content": context["conversation_summary"]}
+    ]) <= HISTORY_TARGET_TOKENS - PRESERVE_RECENT_TOKENS
     assert not context["conversation_summary"].endswith("第")
 
 
@@ -183,7 +311,7 @@ def test_long_ascii_identifier_token_estimate_scales_with_length():
     assert estimate_tokens(message) >= 25
 
 
-def test_context_budget_compresses_fewer_than_six_very_large_turns():
+def test_a_few_very_large_turns_still_trigger_compaction():
     history = [
         {
             "role": "user" if index % 2 == 0 else "assistant",
@@ -192,8 +320,10 @@ def test_context_budget_compresses_fewer_than_six_very_large_turns():
         for index in range(8)
     ]
 
-    context = manage_context_window(history)
+    context = manage_context_window(history, summarizer=lambda messages: "摘要")
 
+    # Only 8 messages, but each is huge — the trigger is tokens, not turn count.
+    assert context["compacted"] is True
     assert context["older_message_count"] > 0
     assert context["estimated_tokens"] <= TOKEN_THRESHOLD
 
@@ -202,50 +332,43 @@ def test_context_api_accepts_current_message_for_relevance():
     assert "current_message" in signature(manage_context_window).parameters
 
 
-def test_context_preserves_relevant_older_evidence_and_structured_working_state():
+def test_working_context_survives_compaction_intact():
     history = [
         {"role": "user", "content": "检查 cluster-001 的容量风险"},
         {"role": "assistant", "content": "cluster-001 当前需要持续观察。"},
+        *_long_history(turns=20),
     ]
-    for index in range(7):
-        history.extend([
-            {"role": "user", "content": f"第 {index} 轮查询普通资源"},
-            {"role": "assistant", "content": f"第 {index} 轮普通资源结果"},
-        ])
 
     context = manage_context_window(
         history,
         current_message="继续分析 cluster-001 的容量趋势",
+        summarizer=lambda messages: "摘要",
     )
 
-    assert any(
-        "cluster-001" in item["content"]
-        for item in context["relevant_messages"]
-    )
+    # The resource pointer is the one thing compaction must never lose: the
+    # originating turn is now inside the summary, but the ID is still exact.
+    assert context["compacted"] is True
     assert context["working_context"]["active_resource_ids"] == ["cluster-001"]
     assert context["working_context"]["latest_user_request"] == "继续分析 cluster-001 的容量趋势"
     assert context["working_context"]["history_message_count"] == len(history)
     assert context["estimated_tokens"] <= TOKEN_THRESHOLD
 
 
-def test_relevant_history_matches_chinese_topic_without_resource_id():
+def test_relevant_older_evidence_is_pulled_back_after_compaction():
     history = [
-        {"role": "user", "content": "之前讨论过集群容量风险和扩容窗口"},
-        {"role": "assistant", "content": "建议持续观察剩余容量。"},
+        {"role": "user", "content": "检查 cluster-001 的容量风险"},
+        {"role": "assistant", "content": "cluster-001 当前需要持续观察。"},
+        *_long_history(turns=20),
     ]
-    for index in range(7):
-        history.extend([
-            {"role": "user", "content": f"普通资源查询 {index}"},
-            {"role": "assistant", "content": f"普通资源结果 {index}"},
-        ])
 
     context = manage_context_window(
         history,
-        current_message="继续分析容量趋势",
+        current_message="继续分析 cluster-001 的容量趋势",
+        summarizer=lambda messages: "摘要",
     )
 
     assert any(
-        "容量风险" in item["content"]
+        "cluster-001" in item["content"]
         for item in context["relevant_messages"]
     )
 
@@ -254,16 +377,13 @@ def test_relevant_history_keeps_user_and_assistant_turn_together():
     history = [
         {"role": "user", "content": "检查 cluster-001 的 CPU Ready"},
         {"role": "assistant", "content": "峰值为 26%，建议检查宿主机争抢。"},
+        *_long_history(turns=20),
     ]
-    for index in range(7):
-        history.extend([
-            {"role": "user", "content": f"普通资源查询 {index}"},
-            {"role": "assistant", "content": f"普通资源结果 {index}"},
-        ])
 
     context = manage_context_window(
         history,
         current_message="继续分析 cluster-001",
+        summarizer=lambda messages: "摘要",
     )
 
     assert context["relevant_messages"][:2] == history[:2]
@@ -287,6 +407,7 @@ def test_all_context_sections_share_one_hard_token_budget():
     context = manage_context_window(
         history,
         current_message="继续分析这些资源的容量趋势：" + "下一步计划。" * 80,
+        summarizer=lambda messages: "摘要",
     )
 
     assert context["estimated_tokens"] <= TOKEN_THRESHOLD
@@ -321,3 +442,82 @@ def test_responder_payload_includes_skill_and_tool_search_summaries_and_stays_un
     assert parsed["tool_search_request"]["query"] == "get_vm_metrics"
     assert parsed["tool_search_candidates"][0]["tool_name"] == "get_vm_metrics"
     assert parsed["retrieved_cases"][0]["title"] == "CPU Ready 过高历史案例"
+
+
+# --- Large tool results (list summarization before the responder) ------------
+# Shaped like backend/adapters/edme.py's virtual_alarms() output: numeric
+# severity_code plus a label, which is what a real site returns by the hundred.
+
+def _edme_alarm(index: int, severity_code: int) -> dict:
+    labels = {1: "critical", 2: "major", 3: "minor", 4: "warning"}
+    return {
+        "id": f"0x810{index:04d}",
+        "severity": labels[severity_code],
+        "severity_code": severity_code,
+        "name": "主机CPU使用率超过阈值",
+        "object_type": "host",
+        "object_id": f"urn:sites:DEMO:hosts:{index}",
+        "status": "active",
+        "additional_information": "CPU 使用率持续超过阈值 " * 10,
+    }
+
+
+def test_a_large_alarm_list_is_grouped_instead_of_shipped_whole():
+    # 4 critical + 6 major + 190 low-severity: the shape that blows the payload
+    # cap on a real site.
+    alarms = (
+        [_edme_alarm(i, 1) for i in range(4)]
+        + [_edme_alarm(100 + i, 2) for i in range(6)]
+        + [_edme_alarm(200 + i, 4) for i in range(190)]
+    )
+    summarized = copilot._summarize_tool_result(
+        {"tool_name": "list_alarms", "success": True, "error_code": None, "data": alarms}
+    )
+
+    data = summarized["data"]
+    assert data["total"] == 200
+    assert data["grouped_counts"]["critical"] == 4
+    assert data["grouped_counts"]["warning"] == 190
+    # Detail is kept only where an operator needs it; the rest becomes counts.
+    assert data["detail_kept"] == 10
+    assert data["collapsed_count"] == 190
+    assert {item["severity"] for item in data["high_severity_detail"]} == {"critical", "major"}
+
+
+def test_a_small_alarm_list_is_left_alone():
+    alarms = [_edme_alarm(i, 2) for i in range(4)]
+    # Below the threshold the raw entries are more useful than a summary, and
+    # the payload can afford them.
+    assert copilot._summarize_tool_result(
+        {"tool_name": "list_alarms", "success": True, "error_code": None, "data": alarms}
+    ) is None
+
+
+def test_summarizing_the_payload_does_not_weaken_grounding():
+    """The responder sees a summary; grounding still checks the real results.
+
+    A collapsed alarm is invisible to the model, so it cannot be asserted — but
+    if the model does name a resource that was collapsed, the claim is still
+    backed by data the tool genuinely returned and must not be rejected.
+    """
+    alarms = [_edme_alarm(i, 4) for i in range(30)]
+    state = {
+        "message": "有哪些告警",
+        "conversation_summary": "", "working_context": {}, "recent_messages": [],
+        "loaded_skills": [], "retrieved_cases": [], "skill_decision": {},
+        "tool_search_request": {}, "tool_search_candidates": [], "route_decisions": [],
+        "plan": [], "error": None,
+        "tool_results": [{
+            "tool_name": "list_alarms", "success": True, "error_code": None, "data": alarms,
+        }],
+    }
+    payload = json.loads(copilot._responder_payload(state))
+    assert payload["tool_results"][0]["data"]["collapsed_count"] == 30
+
+    collapsed_id = alarms[7]["object_id"]
+    grounded, _ = copilot.verify_resource_claims(
+        f"其中 {collapsed_id} 也在告警中。",
+        [{"id": collapsed_id, "kind": "state_assertion", "from_tool": "list_alarms"}],
+        state["tool_results"],
+    )
+    assert grounded

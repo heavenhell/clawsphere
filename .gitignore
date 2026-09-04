@@ -3,9 +3,12 @@ __pycache__/
 *.pyc
 .env
 /config/platforms.json
+/config/platforms.*.json
+!/config/platforms.*.example.json
 node_modules/
 dist/
 *.log
+/logs/
 /data/
 output/
 .playwright-cli/
@@ -15,3 +18,6 @@ eval/report.json
 /_diag.py
 /_test_req.json
 /proxysg_ca.pem
+
+# Site-exported CA bundles are local trust material, not source.
+/config/*.pem

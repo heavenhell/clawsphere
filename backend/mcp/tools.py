@@ -8,8 +8,10 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
+from backend.adapters.edme import PlatformAuthExpiredError, PlatformPermissionDeniedError
 from backend.guardrails.permission import has_allowed_role
 from backend.guardrails.approvals import approval_store
+from backend.mcp.auth import AuthContext
 from backend.mcp.schemas import (
     AlarmDetailParams,
     AlarmListParams,
@@ -24,6 +26,7 @@ from backend.mcp.schemas import (
     ModifyHaPolicyParams,
     RestartVmParams,
     ScaleClusterParams,
+    SessionHistoryParams,
     StoragePoolParams,
     ToolParams,
     ToolRequest,
@@ -34,13 +37,16 @@ from backend.mcp.schemas import (
 )
 from backend.providers import repo
 from backend.memory.database import memory_db
+from backend.memory.long_term import fit_recall_budget, long_term_memory
 from backend.observability import TOOL_CALLS, TOOL_LATENCY
 
 
 # Bumped manually whenever a tool's presence/definition changes materially.
 # Consumed by authorization_epoch() to detect a stale in-flight write across a
 # HITL pause.
-TOOL_CATALOG_VERSION = 1
+# v2: added search_session_history (long-term memory recall).
+# v3: widened id patterns (cluster/pool/alarm) to accept real eDME ids (urn:/hex).
+TOOL_CATALOG_VERSION = 4
 TOOL_METADATA_KEY = "com.clawsphere/tool"
 
 
@@ -54,6 +60,12 @@ class ToolSpec:
     fn: Callable[..., Any]
     category: str
     tags: list[str]
+    # When true, call_tool passes the verified caller identity as `_caller`.
+    # Reserved for tools reading per-user data, where scoping cannot be left to
+    # a model-supplied parameter. `_caller` is not part of input_model, so it
+    # never appears in the schema handed to the model and cannot be spoofed.
+    needs_caller: bool = False
+    retry_on_auth_expiry: bool = False
 
 
 TOOL_REGISTRY: dict[str, ToolSpec] = {}
@@ -67,6 +79,8 @@ def mcp_tool(
     auth_roles: list[str] | None = None,
     category: str = "general",
     tags: list[str] | None = None,
+    needs_caller: bool = False,
+    retry_on_auth_expiry: bool = False,
 ):
     def decorator(fn: Callable[..., Any]):
         TOOL_REGISTRY[name] = ToolSpec(
@@ -78,12 +92,14 @@ def mcp_tool(
             fn=fn,
             category=category,
             tags=tags or [],
+            needs_caller=needs_caller,
+            retry_on_auth_expiry=retry_on_auth_expiry,
         )
         return fn
     return decorator
 
 
-@mcp_tool("list_alarms", "查询当前活动告警", AlarmListParams, category="alert", tags=["alarm", "fusioncompute"])
+@mcp_tool("list_alarms", "查询当前活动告警", AlarmListParams, category="alert", tags=["alarm", "fusioncompute"], retry_on_auth_expiry=True)
 def list_alarms(severity: str | None = None):
     alarms = [alarm for alarm in repo.alarms() if alarm.get("status") == "active"]
     if severity:
@@ -96,6 +112,7 @@ def list_alarms(severity: str | None = None):
     "查询 DCS/FusionCompute 资源总览",
     category="resource",
     tags=["overview", "aggregate", "fusioncompute"],
+    retry_on_auth_expiry=True,
 )
 def get_resource_overview():
     return {
@@ -115,6 +132,7 @@ def get_resource_overview():
     AlarmDetailParams,
     category="alert",
     tags=["alarm", "detail", "fusioncompute"],
+    retry_on_auth_expiry=True,
 )
 def get_alarm_detail(alarm_id: str):
     alarm = next((a for a in repo.alarms() if a["id"] == alarm_id), None)
@@ -133,7 +151,7 @@ def get_alarm_detail(alarm_id: str):
     return {"alarm": alarm, "related": related}
 
 
-@mcp_tool("list_clusters", "查询集群列表和容量概览", category="resource", tags=["cluster", "fusioncompute"])
+@mcp_tool("list_clusters", "查询集群列表和容量概览", category="resource", tags=["cluster", "fusioncompute"], retry_on_auth_expiry=True)
 def list_clusters():
     return repo.clusters()
 
@@ -144,6 +162,7 @@ def list_clusters():
     ClusterCapacityParams,
     category="capacity",
     tags=["cluster", "capacity", "fusioncompute"],
+    retry_on_auth_expiry=True,
 )
 def get_cluster_capacity(cluster_id: str):
     cluster = next((c for c in repo.clusters() if c["id"] == cluster_id), None)
@@ -152,16 +171,24 @@ def get_cluster_capacity(cluster_id: str):
     datastores = [ds for ds in repo.datastores() if ds.get("cluster_id") == cluster_id]
     total = sum(ds.get("capacity_gb", 0) for ds in datastores)
     free = sum(ds.get("free_gb", 0) for ds in datastores)
+    used_ratio = round(1 - free / total, 3) if total else 0
+    if total and free / total < 0.15:
+        risk_level = "high"
+    elif total and free / total < 0.3:
+        risk_level = "medium"
+    else:
+        risk_level = "low"
     return {
         "cluster": cluster,
         "datastore_capacity_gb": total,
         "datastore_free_gb": free,
-        "datastore_used_ratio": round(1 - free / total, 3) if total else 0,
-        "risk_level": "high" if free / total < 0.15 else "medium" if free / total < 0.3 else "low",
+        "datastore_used_ratio": used_ratio,
+        "risk_level": risk_level,
+        "matched_datastores": len(datastores),
     }
 
 
-@mcp_tool("list_vms", "查询虚拟机列表", VmListParams, category="resource", tags=["vm", "fusioncompute"])
+@mcp_tool("list_vms", "查询虚拟机列表", VmListParams, category="resource", tags=["vm", "fusioncompute"], retry_on_auth_expiry=True)
 def list_vms(status: str | None = None):
     vms = repo.vms()
     if status:
@@ -175,6 +202,7 @@ def list_vms(status: str | None = None):
     VmDetailParams,
     category="resource",
     tags=["vm", "detail", "fusioncompute"],
+    retry_on_auth_expiry=True,
 )
 def get_vm_detail(vm_id: str):
     vm = next((item for item in repo.vms() if item["id"] == vm_id or item["name"] == vm_id), None)
@@ -190,6 +218,7 @@ def get_vm_detail(vm_id: str):
     VmMetricsParams,
     category="performance",
     tags=["vm", "metrics", "performance", "fusioncompute"],
+    retry_on_auth_expiry=True,
 )
 def get_vm_metrics(vm_id: str, metric_names: list[str] | None = None, time_range: str = "1h"):
     detail = get_vm_detail(vm_id)
@@ -208,6 +237,7 @@ def get_vm_metrics(vm_id: str, metric_names: list[str] | None = None, time_range
     ForecastParams,
     category="capacity",
     tags=["forecast", "capacity", "cluster"],
+    retry_on_auth_expiry=True,
 )
 def run_capacity_forecast(cluster_id: str, forecast_days: int = 30):
     capacity = get_cluster_capacity(cluster_id)
@@ -232,6 +262,7 @@ def run_capacity_forecast(cluster_id: str, forecast_days: int = 30):
     StoragePoolParams,
     category="resource",
     tags=["storage", "dorado"],
+    retry_on_auth_expiry=True,
 )
 def get_storage_pool_usage(pool_id: str | None = None):
     return repo.storage_pool_usage(pool_id)
@@ -243,6 +274,7 @@ def get_storage_pool_usage(pool_id: str | None = None):
     EdmeAlarmParams,
     category="alert",
     tags=["alarm", "edme"],
+    retry_on_auth_expiry=True,
 )
 def query_edme_current_alarms(severity: int | None = None, iterator: str | None = None):
     return repo.edme_current_alarms(severity, iterator)
@@ -254,6 +286,7 @@ def query_edme_current_alarms(severity: int | None = None, iterator: str | None 
     EdmeResourceParams,
     category="resource",
     tags=["edme", "resource"],
+    retry_on_auth_expiry=True,
 )
 def query_edme_resources(class_name: str = "SYS_StorageDevice", page_no: int = 1, page_size: int = 20):
     return repo.edme_resource_instances(class_name, page_no, page_size)
@@ -265,6 +298,7 @@ def query_edme_resources(class_name: str = "SYS_StorageDevice", page_no: int = 1
     EdmeMetricCatalogParams,
     category="performance",
     tags=["edme", "metric", "catalog"],
+    retry_on_auth_expiry=True,
 )
 def get_edme_metric_catalog(object_type_id: int | None = None):
     return {
@@ -279,6 +313,7 @@ def get_edme_metric_catalog(object_type_id: int | None = None):
     EdmeHistoryParams,
     category="performance",
     tags=["edme", "metric", "history"],
+    retry_on_auth_expiry=True,
 )
 def query_edme_performance_history(
     object_ids: list[str] | None = None,
@@ -289,6 +324,43 @@ def query_edme_performance_history(
         "time_range": time_range,
         "series": repo.edme_history(object_ids, indicator_ids, time_range),
         "indicators": repo.edme_indicators(),
+    }
+
+
+@mcp_tool(
+    "search_session_history",
+    "查询该资源或该主题在历史会话中的诊断结论、处置记录和已执行变更",
+    SessionHistoryParams,
+    category="history",
+    tags=["历史", "以前", "上次", "记录", "处置", "复盘", "history", "past", "previous"],
+    needs_caller=True,
+    retry_on_auth_expiry=True,
+)
+def search_session_history(
+    resource_id: str | None = None,
+    fact_type: str | None = None,
+    keywords: str | None = None,
+    since_days: int = 90,
+    limit: int = 3,
+    _caller: AuthContext | None = None,
+):
+    if _caller is None:
+        raise ValueError("历史记忆查询缺少调用者身份")
+    facts = long_term_memory.search(
+        tenant_id=_caller.tenant_id,
+        user_id=_caller.user_id,
+        resource_id=resource_id,
+        fact_type=fact_type,
+        keywords=keywords,
+        since_days=since_days,
+        limit=limit,
+    )
+    return {
+        # Consumed by the responder's grounding rules: these are past
+        # observations, never evidence for a claim about current state.
+        "is_historical": True,
+        "notice": "以下为历史会话记录，不代表资源的当前状态；如需当前状态请调用实时查询工具。",
+        "facts": fit_recall_budget(facts),
     }
 
 
@@ -392,7 +464,11 @@ def tool_catalog_tier1(roles: list[str]) -> str:
     )
 
 
-def call_tool(request: ToolRequest) -> ToolResponse:
+def call_tool(
+    request: ToolRequest,
+    *,
+    preflight_error_code: str | None = None,
+) -> ToolResponse:
     started = perf_counter()
     audit_id = str(uuid4())
     spec = TOOL_REGISTRY.get(request.tool_name)
@@ -414,7 +490,16 @@ def call_tool(request: ToolRequest) -> ToolResponse:
             audit_id=audit_id,
         )
 
-    if not spec:
+    if preflight_error_code not in {None, "PLATFORM_AUTH_EXPIRED"}:
+        raise ValueError("unsupported tool preflight error")
+    if preflight_error_code == "PLATFORM_AUTH_EXPIRED":
+        tool_response = response(
+            False,
+            error_code="PLATFORM_AUTH_EXPIRED",
+            error_msg="eDME 平台认证已失效",
+        )
+        risk_level = spec.risk if spec else "unknown"
+    elif not spec:
         tool_response = response(False, error_code="TOOL_NOT_FOUND", error_msg="工具不存在")
         risk_level = "unknown"
     elif not has_allowed_role(request.caller_roles, spec.auth_roles):
@@ -422,6 +507,19 @@ def call_tool(request: ToolRequest) -> ToolResponse:
         risk_level = spec.risk
     else:
         risk_level = spec.risk
+        def invoke(call_params: dict[str, Any]) -> Any:
+            """Add the verified caller identity only at call time.
+
+            `params` itself stays clean because it is also compared against the
+            approved tool_calls; `_caller` never comes from request.params, so a
+            model-authored parameter cannot widen the caller's scope, and it is
+            absent from input_model so it never reaches the model's schema."""
+            if not spec.needs_caller:
+                return spec.fn(**call_params)
+            return spec.fn(**call_params, _caller=AuthContext(
+                request.caller_user_id, request.caller_roles, request.tenant_id
+            ))
+
         try:
             params = spec.input_model.model_validate(request.params).model_dump(exclude_none=True)
             if spec.risk in {"medium", "high"}:
@@ -458,7 +556,7 @@ def call_tool(request: ToolRequest) -> ToolResponse:
                     if not validation["allowed"]:
                         raise ValueError("；".join(validation["violations"]))
                     params = validation["tool_calls"][0]["params"]
-                    tool_response = response(True, data=spec.fn(**params))
+                    tool_response = response(True, data=invoke(params))
             elif request.tool_name == "create_approval_request":
                 from backend.guardrails.policy import validate_tool_calls
 
@@ -489,7 +587,19 @@ def call_tool(request: ToolRequest) -> ToolResponse:
                 )
                 tool_response = response(True, data=data)
             else:
-                tool_response = response(True, data=spec.fn(**params))
+                tool_response = response(True, data=invoke(params))
+        except PlatformAuthExpiredError:
+            tool_response = response(
+                False,
+                error_code="PLATFORM_AUTH_EXPIRED",
+                error_msg="eDME 平台认证已失效",
+            )
+        except PlatformPermissionDeniedError:
+            tool_response = response(
+                False,
+                error_code="PERMISSION_DENIED",
+                error_msg="当前 eDME 业务账号权限不足",
+            )
         except (TypeError, ValidationError) as exc:
             tool_response = response(False, error_code="SCHEMA_VALIDATION_FAILED", error_msg=str(exc))
         except ValueError as exc:

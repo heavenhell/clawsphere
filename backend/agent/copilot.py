@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 import threading
 from time import perf_counter
 from typing import Any, Literal, TypedDict
@@ -15,6 +17,7 @@ from backend.agent.llm import (
     call_deepseek_agent_plan,
     call_deepseek_json,
     get_last_llm_usage,
+    get_last_llm_request_budget,
     get_llm_status,
     get_public_llm_status,
     reset_llm_request_status,
@@ -41,6 +44,7 @@ from backend.memory.context_manager import (
     manage_context_window,
 )
 from backend.memory.database import memory_db
+from backend.memory.long_term import long_term_memory
 from backend.memory.retriever import retrieve_discovered_tools, retrieve_history, retrieve_tools
 from backend.memory.store import write_conversation_summary
 from backend.skills.loader import (
@@ -52,6 +56,8 @@ from backend.skills.loader import (
 from backend.observability import observe_agent
 from backend.agent.audit_log import log_grounding_rejection, log_session_turn
 
+
+LOGGER = logging.getLogger(__name__)
 
 # --- Configuration -----------------------------------------------------------
 # Death-loop / runaway guardrail: a single turn may execute at most this many
@@ -72,6 +78,8 @@ class CopilotState(TypedDict, total=False):
     user_roles: list[str]
     tenant_id: str
     conversation_summary: str
+    summarized_upto_id: int
+    context_compacted: bool
     recent_messages: list[dict[str, str]]
     relevant_messages: list[dict[str, str]]
     working_context: dict[str, Any]
@@ -104,6 +112,8 @@ class CopilotState(TypedDict, total=False):
     execution_log: list[dict[str, Any]]
     final_response: str
     resource_claims: list[dict[str, Any]]
+    memory_note: dict[str, Any]
+    long_term_facts_written: list[str]
     response_source: str
     llm_available: bool
     step_budget_hit: bool
@@ -147,8 +157,11 @@ TOOL_SEARCH_PROMPT = f"""{IDENTITY_BLOCK}
 
 当前阶段:工具检索。你可能已经拿到一个 Skill 的完整内容;如果没有,说明这个请求不对应任何已知 Skill,
 你需要直接基于用户消息和历史判断需要什么数据。判断本轮是否需要调用真实工具获取数据:
-- 需要就调用 ToolSearch,给出简短的检索 query(用于在工具目录里做关键词检索)、期望返回的候选数量 top_k,以及可选的 required_capabilities 标签。
-- 不需要实时数据(纯概念/流程说明)就不要调用 ToolSearch。
+- **涉及当前状态/实时数据的查询(告警、资源清单、主机/VM/集群、存储、容量、性能指标等)必须调用 ToolSearch 检索工具**,
+  给出简短的检索 query(用于在工具目录里做关键词检索)、期望返回的候选数量 top_k,以及可选的 required_capabilities 标签。
+  即使历史对话里有之前的查询结果,也必须重新检索工具以获取**本轮最新数据**,不得直接复用旧数据。
+- 仅当请求是纯概念/流程/寒暄(不需要任何平台数据)时才不调用 ToolSearch。
+- **严禁在本阶段直接输出面向用户的完整回答**:本阶段只做"是否检索工具"的决策,输出必须是一条 ToolSearch 调用,或一个带简短理由的 declined(仅限确实不需要数据的情形)。不得把最终回答内容写进 reason。
 
 工具目录按以下几类组织,你看不到具体工具名和参数 schema,只需要用自然语言描述需要什么数据:
 - alert:告警查询
@@ -163,7 +176,9 @@ TOOL_CALL_PROMPT = f"""{IDENTITY_BLOCK}
 规则:
 - 优先使用最少、最相关的工具,只从下面提供的候选里选,不要假设存在没给你的工具。
 - 调用工具时严格按参数 schema 传参,不要添加 schema 未定义的字段,不确定的可选参数就不要传。
-- 只有用户明确指向的对象(VM/集群/告警/存储 ID 或名称)才调用相关工具;缺少标识时不要猜测资源,也不要调用工具。
+- 列表/清单/统计类问题(如"有哪些告警""列出资源""多少台VM""当前状态")必须调用对应的列表查询工具获取**本轮最新数据**,
+  即使历史对话里有之前的查询结果,也必须重新调用工具,不得直接复用旧数据回答——本轮没有工具数据支撑的状态断言会被守卫拒绝。
+- 只有用户明确指向的对象(VM/集群/告警/存储 ID 或名称)才调用对应的详情工具;缺少标识时不要猜测资源,也不要调用工具。
 - 写操作(重启/扩容/迁移/修改/删除)只提出对应工具调用,是否执行由护栏和审批独立裁决,你无法绕过。
 - 追问("它呢""第二条""上面说的X")请结合历史自行消解指代。"""
 
@@ -176,12 +191,18 @@ tool_search_candidates、route_decisions、retrieved_cases 等前序阶段的决
 - "resource_claims": 数组。回答里出现的每一个资源 ID(如 vm-1001、host-005、alarm-9001、edme-storage-002)都必须在此申报一条:
     - {{"id": "<资源ID>", "kind": "example"}}  用于举例说明或引用历史上下文,不断言其当前状态。
     - {{"id": "<资源ID>", "kind": "state_assertion", "from_tool": "<工具名>"}}  断言该资源的当前状态/数值,必须来自本轮某个工具结果。
+- "memory_note": 可选对象。仅当本轮出现了"工具查不到、但以后仍然有用"的信息时才填,否则整个字段省略。
+    - {{"type": "preference", "content": "..."}}  用户表达的运维偏好(如只关注 major 以上告警、变更窗口)。
+    - {{"type": "resource", "content": "..."}}    资源的人为约定或例外(如某集群是灾备、某VM待下线)。
 
 硬性要求:
 - 只能基于 tool_results 里的真实数据断言资源状态;严禁编造 tool_results 之外的资源、数值或状态。
 - 解释术语/概念时只讲原理,可引用历史对象举例(kind=example),但不要声称它们的当前状态。
+- search_session_history 返回的是**历史记录,不是当前状态**。引用它时必须写明距今时间(如"约 12 天前的处置记录"),
+  其中的资源 ID 只能用 kind=example,不能用 kind=state_assertion;要断言当前状态必须另外调用实时查询工具。
 - 写操作在审批前一律说明"已进入审批,未执行",不得声称已完成。
-- answer 中提到的每个资源 ID 都必须在 resource_claims 里出现,不得遗漏。"""
+- answer 中提到的每个资源 ID 都必须在 resource_claims 里出现,不得遗漏。
+- memory_note 只记结论、约定和偏好,不要把当前指标数值写进去——那些下次调用工具就能查到,存下来只会过期。"""
 
 TOOL_SEARCH_META_TOOL = [{
     "type": "function",
@@ -332,6 +353,10 @@ def _skill_router_payload(state: CopilotState) -> str:
     payload = {
         "message": state["message"],
         "conversation_summary": state.get("conversation_summary", "")[:1500],
+        # The resource pointer survives compaction intact, so it is the most
+        # reliable basis this stage has for resolving "它/这台机器" — the summary
+        # and recent window are both lossy.
+        "working_context": state.get("working_context", {}),
         "recent_messages": state.get("recent_messages", [])[-6:],
         "skill_catalog": skill_catalog_tier1(state["user_roles"]),
         "tool_catalog": tier1_catalog,
@@ -341,7 +366,7 @@ def _skill_router_payload(state: CopilotState) -> str:
 
 def _call_skill_router(payload: str) -> dict[str, Any] | None:
     try:
-        return call_deepseek_json(SKILL_ROUTER_PROMPT, payload, max_tokens=600)
+        return call_deepseek_json(SKILL_ROUTER_PROMPT, payload, max_tokens=3000)
     except Exception:
         return None
 
@@ -384,6 +409,7 @@ def _budget_exhausted(state: CopilotState) -> bool:
 
 def _stage_metric(stage: str, started: float, success: bool, summary: str = "") -> dict[str, Any]:
     usage = get_last_llm_usage() if success else None
+    request_budget = get_last_llm_request_budget()
     return {
         "stage": stage,
         "latency_ms": int((perf_counter() - started) * 1000),
@@ -391,6 +417,8 @@ def _stage_metric(stage: str, started: float, success: bool, summary: str = "") 
         "model": DEEPSEEK_MODEL,
         "prompt_tokens": (usage or {}).get("prompt_tokens"),
         "completion_tokens": (usage or {}).get("completion_tokens"),
+        "request_bytes": (request_budget or {}).get("final_bytes"),
+        "request_compressed": (request_budget or {}).get("compressed"),
         "summary": summary,
     }
 
@@ -453,6 +481,7 @@ def context_loader(state: CopilotState) -> CopilotState:
         state.get("conversation_summary", ""),
         summarizer,
         current_message=state["message"],
+        watermark=state.get("summarized_upto_id", 0),
     )
     return {
         "recent_messages": context["recent_messages"],
@@ -463,8 +492,12 @@ def context_loader(state: CopilotState) -> CopilotState:
             "older_message_count": context["older_message_count"],
             "relevant_message_count": len(context["relevant_messages"]),
             "estimated_tokens": context["estimated_tokens"],
+            "compacted": context["compacted"],
+            "compaction_skipped_reason": context["compaction_skipped_reason"],
         },
         "conversation_summary": context["conversation_summary"],
+        "summarized_upto_id": context["new_watermark"],
+        "context_compacted": context["compacted"],
         "resource_snapshot": None,
         "alert_payload": None,
     }
@@ -975,6 +1008,63 @@ def _collect_ids(text: str) -> set[str]:
     return {item.lower() for item in RESOURCE_ID_PATTERN.findall(text)}
 
 
+# Field names whose value identifies a resource rather than measuring one.
+_ID_FIELDS = {"urn", "moi", "pid", "sn", "alarmid", "objectid"}
+
+
+def _collect_tool_strings(tool_results: list[dict[str, Any]]) -> set[str]:
+    """Every groundable token this turn's tool results actually contained.
+
+    Built once per turn for O(1) membership checks, replacing repeated
+    json.dumps of large lists plus substring scans over them. Two kinds of
+    entry go in, both lowercased so lookups stay case-insensitive:
+
+    - each string value verbatim, which grounds any ID format the tools return
+      as a field of its own (site-001, urn:..., hex ids, kylin-perf-1);
+    - every resource ID *embedded inside* a string value. Real platforms bury
+      ids in compound text — eDME's MOI reads
+      `对象类型=虚拟机, 虚拟机ID=vm-1001, 主机URN=urn:...:hosts:178`, and alarm
+      names carry them inline. Matching whole values only would reject an
+      answer whose id genuinely came from the tool, which is worse than the
+      over-matching it replaced: the model gets told to drop a true statement.
+    """
+    values: set[str] = set()
+
+    def walk(node: Any, key: str | None = None) -> None:
+        if isinstance(node, str):
+            lowered = node.lower()
+            values.add(lowered)
+            values.update(RESOURCE_ID_PATTERN.findall(lowered))
+        elif isinstance(node, dict):
+            for field, value in node.items():
+                walk(value, field)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value, key)
+        elif isinstance(node, (int, float)) and not isinstance(node, bool):
+            # eDME returns numeric ids unquoted (host_id: 178), so they must be
+            # groundable — but only from a field that actually names an
+            # identifier. Collecting every number would let a metric value
+            # (memory_mb: 8192) satisfy a state assertion about "8192".
+            if key and (key == "id" or key.endswith("_id") or key in _ID_FIELDS):
+                values.add(str(node).lower())
+
+    for result in tool_results:
+        walk(result.get("data"))
+    return values
+
+
+# Tools that return past observations rather than live platform state. Their
+# output must never ground a claim about what is true *now* — without this the
+# grounding check would happily let a three-month-old CPU reading through,
+# because the resource ID really does appear in this turn's tool_results.
+HISTORICAL_TOOLS = {"search_session_history"}
+
+
+def _live_tool_results(tool_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [item for item in tool_results if item.get("tool_name") not in HISTORICAL_TOOLS]
+
+
 def verify_resource_claims(
     answer: str,
     claims: list[dict[str, Any]],
@@ -988,24 +1078,27 @@ def verify_resource_claims(
     Anything else is a fabrication or an ungrounded history-state claim and is
     rejected. State-assertion claims must additionally be backed by tool data."""
     answer_ids = _collect_ids(answer)
-    # Text of this turn's tool results — substring lookup grounds any ID format
-    # the tools actually returned (site-001, pool ids, hex ids), not only those
-    # matched by the resource-ID pattern.
-    tool_text = json.dumps(tool_results, ensure_ascii=False).lower()
-    tool_ids = _collect_ids(json.dumps(tool_results, ensure_ascii=False))
+    # Only live results ground a claim; historical ones must be declared as
+    # `example` instead, which keeps the answer from asserting stale state.
+    live_results = _live_tool_results(tool_results)
+    # Set-based membership over everything the tools actually returned: whole
+    # field values plus the resource ids embedded in them. Built once per turn
+    # (O(1) lookups) — replaces json.dumps of the whole result set plus
+    # substring scans over it.
+    tool_values = _collect_tool_strings(live_results)
     example_ids = {
         str(c.get("id", "")).lower()
         for c in claims
         if c.get("kind") == "example" and c.get("id")
     }
     for answer_id in answer_ids:
-        if answer_id in tool_ids or answer_id in example_ids:
+        if answer_id in tool_values or answer_id in example_ids:
             continue
         return False, f"回答中出现无数据支撑的资源引用：{answer_id}"
     for claim in claims:
         if claim.get("kind") == "state_assertion":
             claim_id = str(claim.get("id", "")).lower()
-            if claim_id and claim_id not in tool_text:
+            if claim_id and claim_id not in tool_values:
                 return False, f"状态断言无工具数据支撑：{claim.get('id')}"
     return True, ""
 
@@ -1021,19 +1114,85 @@ def _cap(value: Any, limit: int) -> Any:
     return text[:limit] + "…(截断)"
 
 
+# Above this size, a list-typed tool result is summarized (grouped counts +
+# high-severity detail only) instead of being shipped raw to the LLM, so a huge
+# inventory (e.g. hundreds of alarms) does not blow up the responder payload.
+LIST_SUMMARY_MIN = 15
+HIGH_SEVERITY_DETAIL_MAX = 40
+HIGH_SEVERITY_LABELS = {"critical", "major", "fatal", "紧急", "重要"}
+
+
+def _summarize_tool_result(item: dict[str, Any]) -> dict[str, Any] | None:
+    """Structured summary for list-typed tool results before they reach the LLM.
+
+    Returns the summarized payload dict when the data is a large, severity-bearing
+    list; returns None when it is not (caller then falls back to raw capping).
+    Keeps full entries only for high-severity items (bounded by
+    HIGH_SEVERITY_DETAIL_MAX), collapses the rest into grouped counts, and
+    preserves total/detail counts so the model still understands the full scope.
+    Resource IDs inside the kept entries are preserved; grounding always checks
+    the *original* tool_results in state, never this summarized view.
+    """
+    data = item.get("data")
+    if not isinstance(data, list) or len(data) <= LIST_SUMMARY_MIN:
+        return None
+    if not data or not isinstance(data[0], dict):
+        return None
+
+    sev_key = next((k for k in ("severity", "severity_code") if k in data[0]), None)
+    if sev_key is None:
+        return None
+
+    counts: dict[str, int] = {}
+    high: list[dict[str, Any]] = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        value = entry.get(sev_key)
+        label = str(value).lower() if value is not None else "unknown"
+        counts[label] = counts.get(label, 0) + 1
+        is_high = (
+            label in HIGH_SEVERITY_LABELS
+            or (isinstance(value, int) and 0 < value <= 2)
+        )
+        if is_high and len(high) < HIGH_SEVERITY_DETAIL_MAX:
+            high.append(entry)
+
+    return {
+        "tool_name": item.get("tool_name"),
+        "success": item.get("success"),
+        "error_code": item.get("error_code"),
+        "data": {
+            "_summary": "列表过大,已按级别分组摘要,仅保留高严重级别部分明细",
+            "total": len(data),
+            "grouped_counts": counts,
+            "high_severity_detail": high,
+            "high_severity_total": sum(c for k, c in counts.items() if k in HIGH_SEVERITY_LABELS or (k.isdigit() and int(k) <= 2)),
+            "detail_kept": len(high),
+            "collapsed_count": len(data) - len(high),
+        },
+    }
+
+
 def _responder_payload(state: CopilotState, feedback: str = "") -> str:
     """Bounded payload for the responder. The full tool_results can exceed the
-    outbound size cap, so each result's data is capped and low-value context is
-    trimmed. Resource IDs are preserved so grounding stays meaningful."""
-    tool_results = [
-        {
+    outbound size cap, so list-type results are summarized first and any
+    remaining result is character-capped; low-value context is trimmed. Resource
+    IDs are preserved so grounding stays meaningful."""
+    tool_results = []
+    for item in state.get("tool_results", []):
+        entry = {
             "tool_name": item.get("tool_name"),
             "success": item.get("success"),
             "error_code": item.get("error_code"),
-            "data": _cap(item.get("data"), RESPONDER_TOOL_DATA_CAP),
+            "data": item.get("data"),
         }
-        for item in state.get("tool_results", [])
-    ]
+        summarized = _summarize_tool_result(entry)
+        if summarized is not None:
+            tool_results.append(summarized)
+        else:
+            entry["data"] = _cap(entry["data"], RESPONDER_TOOL_DATA_CAP)
+            tool_results.append(entry)
     skill_decision = state.get("skill_decision") or {}
     payload = {
         "message": state["message"],
@@ -1141,9 +1300,11 @@ def llm_responder(state: CopilotState) -> CopilotState:
             claims = []
         grounded, reason = verify_resource_claims(answer, claims, state.get("tool_results", []))
         if grounded:
+            note = parsed.get("memory_note")
             return {
                 "final_response": answer,
                 "resource_claims": claims,
+                "memory_note": note if isinstance(note, dict) else {},
                 "response_source": "deepseek",
                 "llm_status": get_public_llm_status(),
                 "fallback_reason": None,
@@ -1168,7 +1329,18 @@ def llm_responder(state: CopilotState) -> CopilotState:
             task_id=state.get("task_id", ""),
             claims=claims,
         )
-        feedback = reason
+        # Grounding rejected: steer the retry toward a compliant answer. If the
+        # reason is a lack of this-turn tool data, the model cannot assert current
+        # state — it must either reference history as example, or the agent has to
+        # call a live tool (handled upstream in tool_call_planner).
+        if "无工具数据支撑" in reason or "无数据支撑" in reason:
+            feedback = (
+                f"{reason}。本轮没有对应工具结果来支撑该资源的当前状态:不要断言其当前状态,"
+                f"只能将其申报为 {{'kind': 'example'}} 引用历史上下文;"
+                f"若需要真实当前状态,请在工具调用阶段先调用对应查询工具。"
+            )
+        else:
+            feedback = reason
         last_reason = "grounding_rejected"
 
     return {
@@ -1183,6 +1355,76 @@ def llm_responder(state: CopilotState) -> CopilotState:
         "llm_stage_metrics": stage_metrics,
         "route_decisions": route_decisions,
     }
+
+
+MEMORY_NOTE_TYPES = {"preference", "resource"}
+
+
+def _write_long_term_memory(state: CopilotState) -> list[str]:
+    """Persist what tools cannot replay: conclusions, effective (and ineffective)
+    actions, executed changes, and human conventions.
+
+    Deliberately NOT written: current metric values, inventories, alarm lists —
+    all one tool call away and stale the moment they are stored.
+
+    Trigger is split by who knows best. Executing a write tool and passing the
+    grounding check are deterministic facts the code observes directly, so code
+    decides those; whether the user just stated a lasting preference is a
+    semantic judgement, so the model raises it via `memory_note`. The model
+    never gets a save tool of its own — that would spend the turn's tool budget
+    and let it decide to persist arbitrary content.
+    """
+    # A rejected answer must never become a remembered "fact".
+    if state.get("response_source") != "deepseek":
+        return []
+
+    written: list[str] = []
+    common = {
+        "tenant_id": state["tenant_id"],
+        "user_id": state["user_id"],
+        "conversation_id": state["conversation_id"],
+    }
+    answer = (state.get("final_response") or "").strip()
+    description = re.split(r"[。\n]", answer)[0][:160] if answer else ""
+    claims = state.get("resource_claims") or []
+    resource_ids = [str(item.get("id")) for item in claims if item.get("id")]
+    executed = [item["tool_name"] for item in state.get("execution_log", []) if item.get("success")]
+    changed = [name for name in executed if _tool_risk(state, name) in {"medium", "high"}]
+
+    if changed:
+        fact = long_term_memory.remember(
+            **common, fact_type="change", description=description or f"执行了 {', '.join(changed)}",
+            body=answer, resource_ids=resource_ids, tools_used=changed, outcome="executed",
+        )
+        if fact:
+            written.append(fact.name)
+    elif resource_ids and any(item.get("kind") == "state_assertion" for item in claims):
+        # A grounded state assertion means this turn reached a real conclusion
+        # about a real resource — the diagnostic arc worth remembering. Repeated
+        # turns on the same resources update this same fact rather than
+        # fragmenting one investigation across five useless records.
+        fact = long_term_memory.remember(
+            **common, fact_type="incident", description=description, body=answer,
+            resource_ids=resource_ids,
+            tools_used=[
+                str(item["tool_name"]) for item in state.get("tool_results", [])
+                if item.get("tool_name")
+            ],
+            outcome="no_change",
+        )
+        if fact:
+            written.append(fact.name)
+
+    note = state.get("memory_note") or {}
+    if note.get("type") in MEMORY_NOTE_TYPES and str(note.get("content") or "").strip():
+        content = str(note["content"]).strip()
+        fact = long_term_memory.remember(
+            **common, fact_type=str(note["type"]), description=content,
+            body=content, resource_ids=resource_ids,
+        )
+        if fact:
+            written.append(fact.name)
+    return written
 
 
 def memory_writer(state: CopilotState) -> CopilotState:
@@ -1201,6 +1443,11 @@ def memory_writer(state: CopilotState) -> CopilotState:
         state["message"],
         state.get("final_response", ""),
         state.get("conversation_summary", ""),
+        # Only advance the stored watermark on a turn that actually compacted;
+        # otherwise leave it where it was.
+        summarized_upto_id=(
+            state.get("summarized_upto_id", 0) if state.get("context_compacted") else None
+        ),
     )
     # Persist a sanitized turn record (normal answers included) so a
     # conversation can be investigated or replayed from disk later.
@@ -1223,7 +1470,14 @@ def memory_writer(state: CopilotState) -> CopilotState:
         "plan": state.get("plan", []),
         "agent_step_count": state.get("agent_step_count", 0),
     })
-    return {"summary": turn_summary}
+    try:
+        remembered = _write_long_term_memory(state)
+    except Exception:
+        # Long-term memory is an enhancement; failing to record must never turn
+        # a successful answer into a failed turn.
+        LOGGER.exception("long-term memory write failed")
+        remembered = []
+    return {"summary": turn_summary, "long_term_facts_written": remembered}
 
 
 def error_handler(state: CopilotState) -> CopilotState:
@@ -1386,7 +1640,9 @@ def run_copilot(
         pending = approval_store.get_pending_for_conversation(conversation_id, user_id, tenant_id)
         if pending:
             raise PendingApprovalError(pending["id"])
-        stored_messages, stored_summary = memory_db.load_conversation(conversation_id, user_id, tenant_id)
+        stored_messages, stored_summary, stored_watermark = memory_db.load_conversation(
+            conversation_id, user_id, tenant_id
+        )
         task_id = str(uuid4())
         config = {"configurable": {"thread_id": task_id}}
         state = get_graph().invoke({
@@ -1399,6 +1655,8 @@ def run_copilot(
             "user_roles": roles or ["readonly"],
             "tenant_id": tenant_id,
             "conversation_summary": stored_summary,
+            "summarized_upto_id": stored_watermark,
+            "context_compacted": False,
             "recent_messages": [],
             "relevant_messages": [],
             "working_context": {},
@@ -1431,6 +1689,8 @@ def run_copilot(
             "hitl_approved": None,
             "final_response": "",
             "resource_claims": [],
+            "memory_note": {},
+            "long_term_facts_written": [],
             "response_source": "pending",
             "llm_available": True,
             "step_budget_hit": False,

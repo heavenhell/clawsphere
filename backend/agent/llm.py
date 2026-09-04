@@ -14,18 +14,48 @@ from urllib.parse import urlparse
 import httpx
 from dotenv import load_dotenv
 
+from backend.agent.request_budget import (
+    LLMPayloadTooLargeError,
+    MAX_REQUEST_BYTES,
+    BudgetedRequest,
+    enforce_request_budget,
+)
+
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 DEEPSEEK_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/chat/completions")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
-MAX_LLM_PAYLOAD_BYTES = 64 * 1024
-MAX_LLM_MESSAGE_CHARS = 16_000
+MAX_LLM_PAYLOAD_BYTES = MAX_REQUEST_BYTES
+_TRUTHY = {"1", "true", "yes", "on"}
+_FALSEY = {"0", "false", "no", "off"}
 
 
-class LLMPayloadTooLargeError(ValueError):
-    pass
+def env_flag(name: str, default: bool) -> bool:
+    """Read a boolean env var. Anything unrecognized keeps the default, so a
+    typo can never silently flip a security-relevant switch to the unsafe side."""
+    raw = (os.getenv(name) or "").strip().lower()
+    if raw in _TRUTHY:
+        return True
+    if raw in _FALSEY:
+        return False
+    return default
+
+
+# HTTP(S) proxy for outbound LLM calls. Behavior is fully explicit:
+#   DEEPSEEK_PROXY_ENABLED=true  + DEEPSEEK_PROXY set  -> route through proxy
+#   DEEPSEEK_PROXY_ENABLED=false (default)              -> direct connect
+# An explicit enable switch keeps behavior deterministic across machines and
+# avoids silently inheriting system-wide proxy env vars.
+DEEPSEEK_PROXY_ENABLED = env_flag("DEEPSEEK_PROXY_ENABLED", False)
+DEEPSEEK_PROXY = os.getenv("DEEPSEEK_PROXY") or None
+# Certificate verification for the outbound LLM call. Defaults to ON: the
+# request carries the API key, so an unverified TLS session is a credential
+# disclosure risk. Only a corporate proxy that terminates TLS with a
+# self-signed certificate justifies DEEPSEEK_VERIFY_SSL=false, and that has to
+# be an explicit, per-machine decision — never the default.
+DEEPSEEK_VERIFY_SSL = env_flag("DEEPSEEK_VERIFY_SSL", True)
 
 _status_lock = threading.Lock()
 _request_status: ContextVar[dict[str, Any] | None] = ContextVar(
@@ -36,6 +66,10 @@ _last_usage: ContextVar[dict[str, Any] | None] = ContextVar(
     "dcs_llm_last_usage",
     default=None,
 )
+_last_request_budget: ContextVar[dict[str, Any] | None] = ContextVar(
+    "dcs_llm_last_request_budget",
+    default=None,
+)
 
 
 def get_last_llm_usage() -> dict[str, Any] | None:
@@ -44,6 +78,11 @@ def get_last_llm_usage() -> dict[str, Any] | None:
     every backend/mock, so callers must degrade gracefully rather than assert
     it's present."""
     return _last_usage.get()
+
+
+def get_last_llm_request_budget() -> dict[str, Any] | None:
+    budget = _last_request_budget.get()
+    return dict(budget) if budget is not None else None
 
 
 def _initial_status() -> dict[str, Any]:
@@ -82,6 +121,7 @@ def _record_status(
 
 def reset_llm_request_status() -> None:
     _request_status.set(_initial_status())
+    _last_request_budget.set(None)
 
 
 def get_llm_status(*, aggregate: bool = False) -> dict[str, Any]:
@@ -236,16 +276,9 @@ def _sanitize_for_llm(value: Any) -> Any:
     return value
 
 
-def _prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def _prepare_payload(payload: dict[str, Any]) -> BudgetedRequest:
     prepared = _sanitize_for_llm(payload)
-    for message in prepared.get("messages", []):
-        content = message.get("content")
-        if isinstance(content, str) and len(content) > MAX_LLM_MESSAGE_CHARS:
-            message["content"] = content[:MAX_LLM_MESSAGE_CHARS].rstrip() + "…"
-    encoded = json.dumps(prepared, ensure_ascii=False).encode("utf-8")
-    if len(encoded) > MAX_LLM_PAYLOAD_BYTES:
-        raise LLMPayloadTooLargeError("LLM payload exceeds the configured outbound size limit")
-    return prepared
+    return enforce_request_budget(prepared)
 
 
 def _validate_response_body(body: Any) -> dict[str, Any]:
@@ -281,6 +314,7 @@ def _validate_response_body(body: Any) -> dict[str, Any]:
 
 
 def _invoke(payload: dict[str, Any]) -> dict[str, Any] | None:
+    _last_request_budget.set(None)
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         _record_status("not_configured")
@@ -291,7 +325,13 @@ def _invoke(payload: dict[str, Any]) -> dict[str, Any] | None:
         _record_status("misconfigured", error_class=type(exc).__name__)
         raise
     try:
-        prepared_payload = _prepare_payload(payload)
+        budgeted_request = _prepare_payload(payload)
+        _last_request_budget.set({
+            "original_bytes": budgeted_request.original_bytes,
+            "final_bytes": budgeted_request.final_bytes,
+            "limit_bytes": MAX_LLM_PAYLOAD_BYTES,
+            "compressed": budgeted_request.compressed,
+        })
     except LLMPayloadTooLargeError as exc:
         _record_status("degraded", error_class=type(exc).__name__)
         raise
@@ -301,11 +341,17 @@ def _invoke(payload: dict[str, Any]) -> dict[str, Any] | None:
     last_error: Exception | None = None
     for attempt in range(3):
         try:
-            with httpx.Client(timeout=timeout) as client:
+            client_kwargs: dict[str, Any] = {"timeout": timeout, "verify": DEEPSEEK_VERIFY_SSL}
+            if DEEPSEEK_PROXY_ENABLED and DEEPSEEK_PROXY:
+                client_kwargs["proxy"] = DEEPSEEK_PROXY
+            with httpx.Client(**client_kwargs) as client:
                 response = client.post(
                     DEEPSEEK_URL,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    json=prepared_payload,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    content=budgeted_request.body,
                 )
                 response.raise_for_status()
         except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as exc:
@@ -352,7 +398,7 @@ def call_deepseek(system_prompt: str, user_prompt: str) -> str | None:
     return body["choices"][0]["message"].get("content")
 
 
-def call_deepseek_json(system_prompt: str, user_prompt: str, max_tokens: int = 1200) -> dict[str, Any] | None:
+def call_deepseek_json(system_prompt: str, user_prompt: str, max_tokens: int = 3000) -> dict[str, Any] | None:
     """Structured-output call. Returns the parsed JSON object the model emitted,
     or None when the LLM is not configured. Raises on transport failure so the
     caller can decide how to degrade. The schema is described in the prompt and
@@ -392,7 +438,7 @@ def call_deepseek_agent_plan(
         "tools": tools,
         "tool_choice": "auto",
         "temperature": 0,
-        "max_tokens": 1000,
+        "max_tokens": 3000,
     })
     if not body:
         return None
@@ -409,8 +455,20 @@ def call_deepseek_agent_plan(
 
 
 def summarize_messages(messages: list[dict[str, str]]) -> str | None:
+    """Fold a conversation segment into a rolling summary.
+
+    Input may start with a prior summary followed by the new segment; the two
+    must be merged, not concatenated. Called only when the conversation
+    overflows its token budget, so the output budget is generous — losing a
+    resource ID or an executed change here loses it permanently.
+    """
     return call_deepseek(
-        "你负责压缩运维对话。保留资源标识、告警编号、执行结论、用户偏好和待处理事项，不超过300 token。",
+        "你负责压缩运维对话。输入可能以“已有摘要”开头，后面是新增对话——请把两者合并成一份摘要，"
+        "不要简单拼接，也不要丢弃已有摘要里的信息。\n"
+        "必须逐字保留：资源标识（VM/主机/集群/存储/告警编号）、精确数值和阈值、已执行的变更及审批单号、"
+        "诊断结论及其依据、用户明确表达的偏好和约定、未完成事项。\n"
+        "可以丢弃：寒暄、重复的中间过程、可以重新调用工具查到的当前状态数值。\n"
+        "输出纯文本，不超过 2500 字。",
         json.dumps(messages, ensure_ascii=False),
     )
 

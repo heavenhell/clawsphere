@@ -18,6 +18,7 @@ class FusionComputeRestAdapter(FusionComputeInterface):
 
     def __init__(self, config: PlatformCredentials, client: httpx.Client | None = None):
         self.config = config
+        self._owns_client = client is None
         self.api_version = config.api_version or "v6.3"
         self.client = client or httpx.Client(
             base_url=config.base_url(7443),
@@ -28,6 +29,10 @@ class FusionComputeRestAdapter(FusionComputeInterface):
         self._token_expires_at = float("inf") if self._token else 0.0
         self._site_id = config.site_id
         self._auth_lock = threading.Lock()
+
+    def close(self) -> None:
+        if self._owns_client:
+            self.client.close()
 
     @property
     def _accept(self) -> str:

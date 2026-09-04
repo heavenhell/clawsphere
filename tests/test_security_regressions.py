@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 import backend.agent.copilot as copilot
 import backend.agent.llm as llm
+import backend.agent.request_budget as request_budget
 from backend.guardrails.chat_limits import ChatLimiter
 from backend.app import app
 from backend.guardrails.approvals import approval_store
@@ -95,6 +96,7 @@ def test_llm_request_status_is_isolated_between_threads():
 
 def test_llm_outbound_payload_redacts_secret_like_values(monkeypatch):
     captured = {}
+    wire = {}
     sentinel = "SENTINEL-SHOULD-NOT-LEAVE"
     quoted_sentinel = "SENTINEL ALPHA BETA SHOULD NOT LEAVE"
     escaped_tail = "ESCAPED-SECRET-TAIL-SHOULD-NOT-LEAVE"
@@ -121,7 +123,9 @@ def test_llm_outbound_payload_redacts_secret_like_values(monkeypatch):
             return False
 
         def post(self, *args, **kwargs):
-            captured.update(kwargs["json"])
+            wire["body"] = kwargs["content"]
+            captured.update(json.loads(kwargs["content"].decode("utf-8")))
+            assert len(kwargs["content"]) <= llm.MAX_LLM_PAYLOAD_BYTES
             return FakeResponse()
 
     monkeypatch.setattr(llm.httpx, "Client", CaptureClient)
@@ -169,6 +173,10 @@ def test_llm_outbound_payload_redacts_secret_like_values(monkeypatch):
     assert sentinel not in json.dumps(captured)
     assert quoted_sentinel not in json.dumps(captured)
     assert escaped_tail not in json.dumps(captured)
+    budget = llm.get_last_llm_request_budget()
+    assert budget["final_bytes"] == len(wire["body"])
+    assert budget["limit_bytes"] == 90 * 1024
+    assert budget["compressed"] is False
 
 
 def test_approval_ids_do_not_collide_for_tasks_with_same_suffix():
@@ -293,6 +301,74 @@ def test_oversized_outbound_payload_is_degraded_not_misconfigured(monkeypatch):
     status = llm.get_llm_status()
     assert status["status"] == "degraded"
     assert status["last_error_class"] == "LLMPayloadTooLargeError"
+
+
+def test_oversized_history_is_sanitized_compressed_and_sent_as_measured_bytes(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-secret")
+    monkeypatch.setattr(llm, "DEEPSEEK_URL", "https://api.deepseek.com/chat/completions")
+    captured_history = []
+    captured_wire = {}
+
+    def compress(history):
+        captured_history.extend(history)
+        return json.dumps({
+            "objective": "answer current",
+            "constraints": [],
+            "decisions": [],
+            "files": [],
+            "completed_work": [],
+            "tool_results": [],
+            "errors": [],
+            "pending_work": ["answer current"],
+            "exact_literals": [],
+        })
+
+    monkeypatch.setattr(request_budget, "_ollama_semantic_compressor", compress)
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    class CaptureClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, *args, **kwargs):
+            captured_wire["body"] = kwargs["content"]
+            return FakeResponse()
+
+    monkeypatch.setattr(llm.httpx, "Client", CaptureClient)
+    current = "current request must stay exact"
+    llm._invoke({
+        "model": "deepseek-v4-flash",
+        "messages": [
+            {"role": "system", "content": "fixed system"},
+            {"role": "user", "content": "password=SENTINEL-SHOULD-NOT-LEAVE"},
+            {"role": "assistant", "content": "x" * 100_000},
+            {"role": "user", "content": current},
+        ],
+    })
+
+    wire_body = captured_wire["body"]
+    sent = json.loads(wire_body.decode("utf-8"))
+    budget = llm.get_last_llm_request_budget()
+    assert budget["compressed"] is True
+    assert budget["final_bytes"] == len(wire_body)
+    assert len(wire_body) <= 90 * 1024
+    assert sent["messages"][-1]["content"] == current
+    assert "SENTINEL-SHOULD-NOT-LEAVE" not in json.dumps(captured_history)
+    assert "SENTINEL-SHOULD-NOT-LEAVE" not in wire_body.decode("utf-8")
 
 
 def _token(user_id: str, roles: list[str], tenant_id: str) -> str:
@@ -588,6 +664,24 @@ def test_approved_tool_must_match_approved_parameters():
     assert response.error_code == "APPROVAL_REQUIRED"
 
 
+def test_approved_write_can_be_invalidated_after_platform_auth_refresh():
+    task_id = f"approval-invalidated-{uuid4()}"
+    item = approval_store.create_or_get(
+        task_id,
+        task_id,
+        "maker",
+        "tenant-invalidate",
+        "restart approval",
+        [{"tool_name": "restart_vm", "params": {"vm_id": "vm-1001"}}],
+        "high",
+    )
+    approval_store.decide(item["id"], True, "checker", "approved")
+
+    assert approval_store.invalidate(task_id, "platform auth refreshed") is True
+    assert approval_store.get_by_task(task_id)["status"] == "invalidated"
+    assert approval_store.invalidate(task_id, "again") is False
+
+
 def test_llm_tool_plan_still_passes_rbac(monkeypatch):
     _propose(
         monkeypatch,
@@ -651,3 +745,57 @@ def test_production_mode_requires_explicit_secret():
     )
     assert result.returncode != 0
     assert "DCS_JWT_SECRET is required" in result.stderr
+
+
+def test_tls_verification_is_on_unless_explicitly_disabled():
+    """The LLM request carries the API key, so verification must default to on.
+
+    Tested through `env_flag` on a throwaway name rather than the real constant:
+    that constant is frozen at import from whatever the developer's own .env
+    says, while the guarantee under test is about a machine that sets nothing.
+    """
+    assert llm.env_flag("DCS_TEST_TLS_FLAG_UNSET", True) is True
+    for disabled in ("false", "0", "no", "off", "FALSE"):
+        os.environ["DCS_TEST_TLS_FLAG"] = disabled
+        assert llm.env_flag("DCS_TEST_TLS_FLAG", True) is False
+
+    # A typo must not silently disable verification.
+    os.environ["DCS_TEST_TLS_FLAG"] = "flase"
+    assert llm.env_flag("DCS_TEST_TLS_FLAG", True) is True
+    os.environ.pop("DCS_TEST_TLS_FLAG", None)
+
+
+def test_llm_client_is_built_with_the_configured_verification_and_proxy(monkeypatch):
+    built: list[dict] = []
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            built.append(kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def post(self, *args, **kwargs):
+            raise RuntimeError("stop after client construction")
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setattr(llm.httpx, "Client", FakeClient)
+    monkeypatch.setattr(llm, "DEEPSEEK_VERIFY_SSL", True)
+    monkeypatch.setattr(llm, "DEEPSEEK_PROXY_ENABLED", False)
+    monkeypatch.setattr(llm, "DEEPSEEK_PROXY", "http://proxy.local:8080")
+
+    with pytest.raises(RuntimeError, match="stop after client construction"):
+        llm._invoke({"model": "m", "messages": [{"role": "user", "content": "hi"}]})
+
+    assert built and built[0]["verify"] is True
+    # The proxy address alone must not route traffic; the switch decides.
+    assert "proxy" not in built[0]
+
+    built.clear()
+    monkeypatch.setattr(llm, "DEEPSEEK_PROXY_ENABLED", True)
+    with pytest.raises(RuntimeError, match="stop after client construction"):
+        llm._invoke({"model": "m", "messages": [{"role": "user", "content": "hi"}]})
+    assert built[0]["proxy"] == "http://proxy.local:8080"

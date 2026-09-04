@@ -80,7 +80,7 @@ sequenceDiagram
 
 | 节点 | 文件位置 | 类型 | 职责 |
 |---|---|---|---|
-| `context_loader` | `copilot.py:305` | 宿主 | 上下文窗口管理（六轮滚动摘要），不变 |
+| `context_loader` | `copilot.py:305` | 宿主 | 上下文窗口管理（触发式水位压缩，见第四节之一） |
 | `history_retriever` | `copilot.py:334` | 宿主 | 仅检索历史案例（`retrieve_history`），不再检索 Skill |
 | `skill_router` | `copilot.py:403` | **LLM1** | 角色过滤后的 Skill 一句话目录 + 工具 tier1 目录 → `{decision, skill_ids, ...}` |
 | `skill_loader` | `copilot.py:347` | 宿主 | 按 `skill_id` 精确加载完整内容，二次角色校验 |
@@ -101,7 +101,8 @@ sequenceDiagram
 
 ```text
 会话/身份            message, task_id, conversation_id, user_id, user_roles, tenant_id
-上下文               conversation_summary, recent_messages, relevant_messages, working_context
+上下文               conversation_summary, summarized_upto_id, context_compacted,
+                    recent_messages, relevant_messages, working_context
 历史检索             retrieved_cases
 Skill 决策链         skill_decision, selected_skill_ids, loaded_skills, skill_catalog_version
 工具检索链           tool_search_request, tool_search_candidates, selected_tool_schemas, tool_catalog_version
@@ -111,13 +112,72 @@ Skill 决策链         skill_decision, selected_skill_ids, loaded_skills, skill
 输出                 final_response, resource_claims, response_source
 ```
 
+### 四之一、上下文 token 预算与触发式压缩
+
+`context_manager.py` 的压缩是**触发式**的，不是每轮执行：
+
+| 常量 | 值 | 含义 |
+|---|---|---|
+| `TOKEN_THRESHOLD` | 9400 | 会话总量超过它才触发压缩 |
+| `HISTORY_TARGET_TOKENS` | 5400 | 压缩后落到的总量 |
+| `PRESERVE_RECENT_TOKENS` | 1400 | 尾部逐字保留，永不折叠进摘要 |
+| `SUMMARY_TOKEN_BUDGET` | 4000 | = TARGET − PRESERVE |
+| `CROSS_SESSION_TOKEN_BUDGET` | 800 | 预留给长期记忆召回，与会话内预算互不挤占 |
+
+三级流水：新消息进**逐字区**（保底 1400）→ 溢出滚入**待压缩区**（仍是原文，照常送模型）→ 总量破 9400 时折叠进**摘要区**。所以 1400 不是"只保留 1400"，而是"压缩时至少保留 1400"；日常状态下原文可以一直涨到 9400。
+
+压缩后可再增长 `9400 − 5400 = 4000` token 才会再次触发，因此压缩之间有充分间隔，不会每轮反复触发。
+
+**水位（`conversations.summarized_upto_id`）** 是已折叠进摘要的最大 `conversation_messages.id`。`load_conversation` 只取 `id > 水位` 的消息，所以：
+
+- 摘要**单调向前**——已压缩的段落不再从原文重算，输入是"旧摘要 + 新增消息"，成本从 O(历史长度) 降到 O(增量)；
+- 历史长度由压缩周期决定而非固定截断，早期消息不会像旧的 `LIMIT 100` 那样被静默丢弃；
+- 只有真正压缩的那一轮才写水位（`append_turn(summarized_upto_id=...)`，SQL 用 `max()` 保证不回退）。
+
+压缩器失败（异常、返回空）时**退回全量携带且不推进水位**，下一轮重试——一次本地压缩失败不应让用户的提问整个失败，更不应静默丢上下文。
+
+实测：40 轮长会话共触发 1 次压缩（旧实现约 37 次）。回归测试见 `tests/test_memory.py` 的 `test_short_conversation_is_carried_verbatim_without_calling_the_summarizer`、`test_watermark_advances_only_when_compaction_runs`、`test_compaction_failure_falls_back_to_full_history_without_advancing_watermark`。
+
+### 四之二、长期记忆（跨会话）
+
+短期记忆 = 上面的会话内水位压缩；长期记忆 = 跨会话、按需召回的结构化条目（`backend/memory/long_term.py`）。
+
+**存储**：一条记忆一个 markdown 文件，`data/memory/{tenant}/{user}/facts/*.md`（路径可用 `DCS_MEMORY_DIR` 覆盖），frontmatter 用 `key: json-value` 严格语法（沿用 `skills/loader.py` 的手写解析，不引入 YAML 生产依赖）。**文件是真相源**，SQLite 的 `long_term_facts` / `long_term_fact_resources` 只是可重建的倒排索引（`rebuild_index()`）。选文件而非纯数据库，是因为运维记忆必须可读、可人工修正、可删除、可 git——这几点向量库都给不了。
+
+**存什么**：只存工具重放不出来的东西。
+
+| type | 内容 | 触发方 |
+|---|---|---|
+| `incident` | 诊断结论、有效/无效的处置 | 代码（有工具结果 + 通过 grounding + 有 `state_assertion`） |
+| `change` | 已执行的变更及审批单号 | 代码（执行了 risk=medium/high 工具） |
+| `preference` | 用户运维偏好 | 模型（responder 的 `memory_note` 字段） |
+| `resource` | 人为约定和例外（灾备集群、待下线机器） | 模型（同上） |
+
+**不存**：当前 CPU/内存数值、资源清单、告警列表——调工具就有，存下来只会过期成幻觉来源。
+
+触发方分工的依据：执行了写工具、是否通过 grounding 是代码直接观测到的确定性事实；"用户刚才是否表达了长期偏好"是语义判断，交给模型。模型**不给独立的 save 工具**——那会挤占 `MAX_TOOL_CALLS_PER_TURN` 预算、让写入内容不可控，并且副作用操作会污染 `tool_results`。
+
+**去碎片**：同一 `(type, conversation_id, 资源集合)` 在 24 小时内**更新同一条**而非新建。一次排障跨五轮，价值只在闭环后的那条结论上，五个碎片会把 3 条的召回名额占满。
+
+**召回**：`search_session_history` 工具，由 `tool_call_planner` 按需调用（agentic：模型自己判断要不要查、怎么查）。四个参数 `resource_id` / `fact_type` / `keywords` / `since_days` 都可选，**模型选填哪个就是查询规划**。资源路径走索引精确匹配；`keywords` 是兜底路径，先按 token 重叠过滤再用 BM25 排序——BM25 的 IDF 在极小语料上会退化成 0（两条记忆中命中一条时 idf 恰好为 0），只靠分数会在记忆刚建立时全部丢弃。
+
+**三道安全约束**：
+
+1. **调用者身份不是模型参数**。`ToolSpec.needs_caller=True` 时由 `call_tool` 在调用瞬间注入 `_caller`，取自已验证的 `ToolRequest`，不在 `input_model` 里因此不出现在模型看到的 schema 中。每次读都按 `(tenant_id, user_id)` 双重限定——同租户跨用户可见运维历史是越权。
+2. **历史不能冒充当前**。`HISTORICAL_TOOLS` 里的工具返回被 `verify_resource_claims` 排除出 `state_assertion` 的合法来源；引用历史资源必须用 `kind=example`。不加这条，护栏会因为"资源 ID 确实在本轮 tool_results 里"而放行三个月前的数据。
+3. **路径无法逃逸**。`_safe_component()` 白名单化每个路径段，`tenant_id`/`user_id`/`name` 都过一遍。
+
+**写入门槛**：只写 `response_source == "deepseek"` 且通过 grounding 的轮次——被护栏打回的回答不能固化成"历史事实"。写入失败被捕获并记录日志，绝不让记忆故障把一次成功的回答变成失败。
+
+回归测试：`tests/test_long_term_memory.py`（20 条，覆盖往返、合并、越权、路径逃逸、grounding 隔离、索引重建）。
+
 `plan`（`list[str]`）是跨阶段**累加**的人类可读原因链（Skill 选择原因 → 工具检索原因 → 工具调用原因），前端渲染成 chip 列表；`route_decisions` 是结构化版本，`skill_router`/`tool_search_planner`/`tool_call_planner` 三个规划节点的每条返回分支都会追加一条 `{stage, decision, reason, detail?}` 记录（`_route_entry()`，`copilot.py`），一一对应 `plan` 累加的同一组决策点。回归测试：`test_route_decisions_records_one_structured_entry_per_planning_stage`、`test_route_decisions_records_single_entry_on_direct_answer_short_circuit`。
 
 ## 五、四个 LLM 阶段的输入/输出契约
 
 ### LLM1 — `skill_router`（`SKILL_ROUTER_PROMPT`, `copilot.py:110`）
 
-- 输入：`IDENTITY_BLOCK` + 角色过滤后的 Skill 目录（`skill_catalog_tier1(roles)`）+ 角色过滤后的**工具 tier1 目录**（`tool_catalog_tier1(roles)`，`tools.py`，只有工具名+分类+一句话描述，**不含参数 schema**）+ 会话摘要 + 最近 6 条消息 + 当前消息。两个目录都是每次调用现算，不是模块加载时固定的常量。
+- 输入：`IDENTITY_BLOCK` + 角色过滤后的 Skill 目录（`skill_catalog_tier1(roles)`）+ 角色过滤后的**工具 tier1 目录**（`tool_catalog_tier1(roles)`，`tools.py`，只有工具名+分类+一句话描述，**不含参数 schema**）+ 会话摘要 + `working_context` + 最近 6 条消息 + 当前消息。`working_context.active_resource_ids` 抗压缩不丢，是本阶段消解"它/这台机器"最可靠的依据（摘要和最近窗口都是有损的）。两个目录都是每次调用现算，不是模块加载时固定的常量。
 - 输出 JSON：`decision ∈ {use_skill, use_tool_directly, direct_answer, clarification_required}`、`skill_ids`（仅 `use_skill` 有意义）、`arguments`、`confidence`、`missing_context`、`reason_summary`。
   - `use_tool_directly`：没有 Skill 覆盖这个请求，但工具目录里能看出需要哪类数据，跳过 `skill_loader` 直接进入 `tool_search_planner`（LLM2），走跟 `use_skill` 完全相同的后半程（工具检索 → 工具调用 → 护栏 → 执行），只是 Skill 上下文为空。这条路径存在的原因：Skill 一句话摘要不一定覆盖所有能用工具回答的问题（例如当前 4 个 Skill 都没提写操作和 eDME），在此之前"没命中 Skill"等于"这轮请求永远碰不到任何工具"，现在多一条不依赖 Skill 目录覆盖面的兜底路径。
 - 失败关闭：JSON 无法解析 / `decision` 非法 / `use_skill` 但 `skill_ids` 为空 → 全部归一为 `direct_answer`（`plan_source="skill_router_fallback"`），不重试。

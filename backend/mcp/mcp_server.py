@@ -1,16 +1,45 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 from uuid import uuid4
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.lowlevel.server import NotificationOptions
 
-from backend.mcp.schemas import ToolRequest
-from backend.mcp.tools import TOOL_METADATA_KEY, TOOL_REGISTRY, call_tool
-from backend.mcp.auth import MCP_CALLER_TOKEN_META_KEY, decode_mcp_caller_token, get_mcp_auth_context
-from backend.providers import runtime_config
+from backend.platform_config import load_runtime_config
 
+
+runtime_config = load_runtime_config(component="mcp-server")
+_previous_runtime_component = os.environ.get("DCS_RUNTIME_COMPONENT")
+os.environ["DCS_RUNTIME_COMPONENT"] = "mcp-server"
+
+try:
+    from backend.mcp.schemas import ToolRequest
+    from backend.mcp.tools import TOOL_METADATA_KEY, TOOL_REGISTRY, call_tool
+    from backend.mcp.auth import (
+        MCP_CALLER_TOKEN_META_KEY,
+        MCP_PLATFORM_CREDENTIAL_HEADER,
+        PlatformDelegationExpiredError,
+        decode_mcp_caller_token,
+        decode_platform_delegation_token,
+        get_mcp_auth_context,
+    )
+    from backend.providers import (
+        delegated_edme_repository,
+        runtime_config as provider_runtime_config,
+        use_repository,
+    )
+finally:
+    if _previous_runtime_component is None:
+        os.environ.pop("DCS_RUNTIME_COMPONENT", None)
+    else:
+        os.environ["DCS_RUNTIME_COMPONENT"] = _previous_runtime_component
+
+if provider_runtime_config != runtime_config:
+    raise RuntimeError(
+        "MCP Server cannot start after providers loaded a different platform config"
+    )
 
 mcp = FastMCP(
     "ClawSphere DCS Operations",
@@ -51,6 +80,22 @@ def _auth_from_context(ctx: Context) -> tuple[Any, str]:
     return decode_mcp_caller_token(token)
 
 
+def _platform_delegation_from_context(ctx: Context, auth: Any):
+    request = ctx.request_context.request
+    token = request.headers.get(MCP_PLATFORM_CREDENTIAL_HEADER) if request else None
+    if not token:
+        if runtime_config.edme.client_delegated:
+            raise PermissionError("MCP 请求缺少 eDME 平台委托凭证")
+        return None
+    if not runtime_config.edme.client_delegated:
+        raise PermissionError("MCP Server 未启用客户端平台委托鉴权")
+    return decode_platform_delegation_token(
+        token,
+        auth,
+        runtime_config.edme.endpoint_fingerprint(26335),
+    )
+
+
 def _call(
     name: str,
     arguments: dict[str, Any],
@@ -63,18 +108,36 @@ def _call(
         # and therefore requires the per-request signed caller token.
         auth = get_mcp_auth_context()
         effective_task_id = task_id or str(uuid4())
+        if runtime_config.edme.client_delegated:
+            raise PermissionError("eDME 客户端委托模式不允许绕过 MCP Header 直接调用")
     else:
         auth, effective_task_id = _auth_from_context(ctx)
         if task_id is not None and task_id != effective_task_id:
             raise PermissionError("MCP task_id 与调用者令牌不匹配")
-    response = call_tool(ToolRequest(
+    request = ToolRequest(
         tool_name=name,
         params=arguments,
         caller_user_id=auth.user_id,
         caller_roles=auth.roles,
         tenant_id=auth.tenant_id,
         task_id=effective_task_id,
-    ))
+    )
+    try:
+        delegation = _platform_delegation_from_context(ctx, auth) if ctx is not None else None
+    except PlatformDelegationExpiredError:
+        return call_tool(
+            request,
+            preflight_error_code="PLATFORM_AUTH_EXPIRED",
+        ).model_dump(mode="json")
+    if delegation is None:
+        response = call_tool(request)
+    else:
+        repository = delegated_edme_repository(delegation.access_session, runtime_config)
+        try:
+            with use_repository(repository):
+                response = call_tool(request)
+        finally:
+            repository.close()
     return response.model_dump(mode="json")
 
 
@@ -123,6 +186,34 @@ def get_vm_metrics(
 ) -> dict[str, Any]:
     """Read CPU, memory, disk and network metrics for a VM."""
     return _call("get_vm_metrics", {"vm_id": vm_id, "metric_names": metric_names, "time_range": time_range}, ctx=ctx)
+
+
+@mcp.tool()
+def search_session_history(
+    resource_id: str | None = None,
+    fact_type: str | None = None,
+    keywords: str | None = None,
+    since_days: int = 90,
+    limit: int = 3,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """Recall past diagnoses, applied fixes and executed changes for a resource.
+
+    Returns historical observations, never current state. Scoping to the caller
+    happens server-side from the signed token, so no identity argument is
+    accepted here.
+    """
+    return _call(
+        "search_session_history",
+        {
+            "resource_id": resource_id,
+            "fact_type": fact_type,
+            "keywords": keywords,
+            "since_days": since_days,
+            "limit": limit,
+        },
+        ctx=ctx,
+    )
 
 
 @mcp.tool()
@@ -236,6 +327,7 @@ def _attach_tool_metadata() -> None:
                 "auth_roles": spec.auth_roles,
                 "category": spec.category,
                 "tags": spec.tags,
+                "retry_on_auth_expiry": spec.retry_on_auth_expiry,
             },
         }
 
