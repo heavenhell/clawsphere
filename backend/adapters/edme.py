@@ -17,6 +17,37 @@ from backend.platform_config import PlatformCredentials
 LOGGER = logging.getLogger(__name__)
 
 
+class PlatformAuthExpiredError(RuntimeError):
+    """The eDME session is definitively no longer usable for this request."""
+
+
+class PlatformPermissionDeniedError(RuntimeError):
+    """The eDME identity is authenticated but lacks permission."""
+
+
+def _session_error_codes(response: httpx.Response) -> set[str]:
+    try:
+        payload = response.json()
+    except (ValueError, UnicodeDecodeError):
+        return set()
+    if not isinstance(payload, dict):
+        return set()
+    values: list[Any] = [
+        payload.get("error_code"), payload.get("errorCode"), payload.get("code"),
+    ]
+    nested = payload.get("error")
+    if isinstance(nested, dict):
+        values.extend([nested.get("error_code"), nested.get("errorCode"), nested.get("code")])
+    return {str(value).strip() for value in values if value is not None and str(value).strip()}
+
+
+def _is_expired_session_response(response: httpx.Response, config: PlatformCredentials) -> bool:
+    if response.status_code == 401:
+        return True
+    configured = set(config.expired_session_error_codes)
+    return bool(response.status_code >= 400 and configured & _session_error_codes(response))
+
+
 def acquire_edme_session(
     config: PlatformCredentials,
     username: str,
@@ -45,7 +76,16 @@ def acquire_edme_session(
         token = str(payload.get("accessSession") or "")
         if not token or len(token) > 8192:
             raise RuntimeError("eDME login response did not include a valid accessSession")
-        expires = max(60, min(int(payload.get("expires") or 1800), 86400))
+        raw_expires = payload.get("expires", 1800)
+        if isinstance(raw_expires, bool):
+            raise RuntimeError("eDME login response included an invalid session lifetime")
+        try:
+            expires = int(raw_expires)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("eDME login response included an invalid session lifetime") from exc
+        if expires <= 0:
+            raise RuntimeError("eDME login response included an invalid session lifetime")
+        expires = min(expires, 86400)
         return token, expires
     finally:
         if owned_client:
@@ -97,10 +137,12 @@ class EDMERestAdapter(EDMEInterface, DoradoInterface):
         headers["X-Auth-Token"] = self._token or ""
         headers.update(kwargs.pop("headers", {}))
         response = self.client.request(method, path, headers=headers, **kwargs)
-        if response.status_code in {401, 403}:
-            self._login(force=True)
-            headers["X-Auth-Token"] = self._token or ""
-            response = self.client.request(method, path, headers=headers, **kwargs)
+        if _is_expired_session_response(response, self.config):
+            if self.config.can_login:
+                self._login(force=True)
+            raise PlatformAuthExpiredError("eDME access session has expired")
+        if response.status_code == 403:
+            raise PlatformPermissionDeniedError("eDME permission denied")
         response.raise_for_status()
         return response.json() if response.content else {}
 

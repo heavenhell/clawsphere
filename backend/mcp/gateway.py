@@ -24,6 +24,7 @@ from backend.mcp.auth import (
     MCP_PLATFORM_CREDENTIAL_HEADER,
     issue_mcp_caller_token,
 )
+from backend.guardrails.approvals import approval_store
 from backend.mcp.schemas import ToolRequest, ToolResponse
 from backend.mcp.tools import TOOL_CATALOG_VERSION, TOOL_METADATA_KEY, TOOL_REGISTRY, call_tool
 from backend.observability import MCP_CLIENT_EVENTS
@@ -57,6 +58,7 @@ class GatewayTool:
     auth_roles: tuple[str, ...]
     category: str
     tags: tuple[str, ...]
+    retry_on_auth_expiry: bool = False
 
     def model_dump(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -139,6 +141,7 @@ def _local_tools() -> list[GatewayTool]:
             auth_roles=tuple(spec.auth_roles),
             category=spec.category,
             tags=tuple(spec.tags),
+            retry_on_auth_expiry=spec.retry_on_auth_expiry,
         )
         for spec in TOOL_REGISTRY.values()
     ]
@@ -323,10 +326,15 @@ class McpToolGateway:
             raise ToolGatewayError(f"MCP 工具 {tool.name} 缺少 ClawSphere 安全元数据")
         roles = metadata.get("auth_roles")
         risk = metadata.get("risk")
+        retry_on_auth_expiry = metadata.get("retry_on_auth_expiry", False)
         if not isinstance(roles, list) or not roles or not set(roles) <= {"readonly", "ops", "admin"}:
             raise ToolGatewayError(f"MCP 工具 {tool.name} 的角色元数据无效")
         if risk not in {"none", "low", "medium", "high"}:
             raise ToolGatewayError(f"MCP 工具 {tool.name} 的风险元数据无效")
+        if not isinstance(retry_on_auth_expiry, bool):
+            raise ToolGatewayError(f"MCP 工具 {tool.name} 的重试元数据无效")
+        if risk in {"medium", "high"} and retry_on_auth_expiry:
+            raise ToolGatewayError(f"MCP 写工具 {tool.name} 不允许声明认证过期自动重试")
         return GatewayTool(
             name=tool.name,
             description=tool.description or "",
@@ -335,6 +343,7 @@ class McpToolGateway:
             auth_roles=tuple(roles),
             category=str(metadata.get("category") or "general"),
             tags=tuple(str(tag) for tag in (metadata.get("tags") or [])),
+            retry_on_auth_expiry=retry_on_auth_expiry,
         )
 
     async def _refresh_catalog(self, auth: AuthContext) -> ToolCatalogSnapshot:
@@ -468,7 +477,7 @@ class IdentityScopedMcpGateway:
         self._lock = threading.RLock()
         self._gateways: dict[tuple[str, tuple[str, ...], str, str], McpToolGateway] = {}
 
-    def _gateway_for(self, auth: AuthContext) -> McpToolGateway:
+    def _gateway_entry(self, auth: AuthContext) -> tuple[McpToolGateway, str]:
         delegated = self.broker.delegation(auth)
         identity = _identity_key(auth)
         if delegated is None:
@@ -479,7 +488,7 @@ class IdentityScopedMcpGateway:
         with self._lock:
             existing = self._gateways.get(key)
             if existing is not None:
-                return existing
+                return existing, session_id
             stale = [item for item in self._gateways if item[:3] == identity]
             for stale_key in stale:
                 self._gateways.pop(stale_key).close()
@@ -493,7 +502,10 @@ class IdentityScopedMcpGateway:
                 default_headers={MCP_PLATFORM_CREDENTIAL_HEADER: token},
             )
             self._gateways[key] = gateway
-            return gateway
+            return gateway, session_id
+
+    def _gateway_for(self, auth: AuthContext) -> McpToolGateway:
+        return self._gateway_entry(auth)[0]
 
     def _close_identity(self, identity: tuple[str, tuple[str, ...], str]) -> None:
         with self._lock:
@@ -501,12 +513,73 @@ class IdentityScopedMcpGateway:
             for key in keys:
                 self._gateways.pop(key).close()
 
+    def _close_session(
+        self,
+        identity: tuple[str, tuple[str, ...], str],
+        session_id: str,
+    ) -> None:
+        with self._lock:
+            gateway = self._gateways.pop((*identity, session_id), None)
+        if gateway is not None:
+            gateway.close()
+
     def catalog(self, auth: AuthContext) -> ToolCatalogSnapshot:
         return self._gateway_for(auth).catalog(auth)
 
     def call(self, request: ToolRequest, expected_catalog_version: str) -> ToolResponse:
         auth = AuthContext(request.caller_user_id, request.caller_roles, request.tenant_id)
-        return self._gateway_for(auth).call(request, expected_catalog_version)
+        gateway, stale_session_id = self._gateway_entry(auth)
+        response = gateway.call(request, expected_catalog_version)
+        if response.error_code != "PLATFORM_AUTH_EXPIRED":
+            return response
+
+        tool = next(
+            (item for item in gateway.catalog(auth).tools if item.name == request.tool_name),
+            None,
+        )
+        if tool is None:
+            raise ToolCatalogChangedError(f"工具 {request.tool_name} 已不在当前 MCP 目录中")
+
+        is_write = tool.risk in {"medium", "high"}
+        if is_write:
+            approval_store.invalidate(request.task_id, "平台认证失效，禁止重放原写操作")
+            MCP_CLIENT_EVENTS.labels("platform_auth_write_not_replayed").inc()
+            LOGGER.info(
+                "platform_auth_write_not_replayed endpoint=%s tool=%s",
+                self.url,
+                request.tool_name,
+            )
+
+        try:
+            self.broker.refresh(auth, stale_session_id=stale_session_id)
+        except Exception as exc:
+            self._close_session(_identity_key(auth), stale_session_id)
+            LOGGER.info(
+                "platform_auth_refresh_failed endpoint=%s tool=%s error_type=%s",
+                self.url,
+                request.tool_name,
+                type(exc).__name__,
+            )
+            return response.model_copy(update={
+                "error_code": "PLATFORM_AUTH_REFRESH_FAILED",
+                "error_msg": "eDME 平台认证刷新失败",
+            })
+
+        self._close_session(_identity_key(auth), stale_session_id)
+        if is_write or not tool.retry_on_auth_expiry:
+            return response.model_copy(update={
+                "error_code": "PLATFORM_AUTH_REFRESHED_RETRY_REQUIRED",
+                "error_msg": "eDME 平台认证已刷新，请重新发起操作",
+            })
+
+        MCP_CLIENT_EVENTS.labels("platform_auth_read_retried").inc()
+        LOGGER.info(
+            "platform_auth_read_retried endpoint=%s tool=%s",
+            self.url,
+            request.tool_name,
+        )
+        refreshed_gateway, _ = self._gateway_entry(auth)
+        return refreshed_gateway.call(request, expected_catalog_version)
 
     def close(self) -> None:
         with self._lock:

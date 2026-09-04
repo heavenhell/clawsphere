@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import httpx
 import pytest
 
-from backend.adapters.edme import EDMERestAdapter
+from backend.adapters.edme import EDMERestAdapter, PlatformAuthExpiredError
 from backend.adapters.fusioncompute import FusionComputeRestAdapter
 from backend.platform_config import PlatformCredentials, load_runtime_config
+from backend.providers import ConfiguredRepository
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_single_config_enables_only_completed_platforms(tmp_path):
@@ -128,13 +135,167 @@ def test_edme_adapter_uses_configured_session_without_login():
 def test_session_only_configuration_fails_clearly_when_session_expires():
     client = httpx.Client(
         base_url="https://edme.local:26335",
-        transport=httpx.MockTransport(lambda _request: httpx.Response(403, json={})),
+        transport=httpx.MockTransport(lambda _request: httpx.Response(401, json={})),
     )
     adapter = EDMERestAdapter(
         PlatformCredentials(ip="edme.local", session="expired-session"), client=client
     )
-    with pytest.raises(RuntimeError, match="session is missing or expired"):
+    with pytest.raises(PlatformAuthExpiredError, match="access session has expired"):
         adapter.edme_resource_instances("SYS_StorageDevice")
+
+
+def test_component_specific_config_paths_take_precedence(tmp_path, monkeypatch):
+    agent_path = tmp_path / "agent.json"
+    server_path = tmp_path / "server.json"
+    agent_path.write_text("{}", encoding="utf-8")
+    server_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("DCS_PLATFORM_CONFIG", str(tmp_path / "legacy.json"))
+    monkeypatch.setenv("DCS_AGENT_PLATFORM_CONFIG", str(agent_path))
+    monkeypatch.setenv("DCS_MCP_SERVER_PLATFORM_CONFIG", str(server_path))
+
+    assert load_runtime_config(component="agent").source_path == agent_path.resolve()
+    assert load_runtime_config(component="mcp-server").source_path == server_path.resolve()
+
+
+def _write_split_client_configs(tmp_path):
+    agent_path = tmp_path / "agent.json"
+    server_path = tmp_path / "server.json"
+    agent_path.write_text(json.dumps({
+        "edme": {
+            "auth_mode": "client",
+            "single_tenant_bootstrap": True,
+            "ip": "edme.example.test",
+            "username": "agent-user",
+            "password": "agent-password",
+        },
+    }), encoding="utf-8")
+    server_path.write_text(json.dumps({
+        "edme": {
+            "auth_mode": "client",
+            "ip": "edme.example.test",
+        },
+    }), encoding="utf-8")
+    return agent_path, server_path
+
+
+def test_mcp_server_process_loads_only_its_credential_free_config(tmp_path):
+    agent_path, server_path = _write_split_client_configs(tmp_path)
+    environment = os.environ.copy()
+    environment["DCS_AGENT_PLATFORM_CONFIG"] = str(agent_path)
+    environment["DCS_MCP_SERVER_PLATFORM_CONFIG"] = str(server_path)
+    command = (
+        "import sys, backend; "
+        "print('providers_preloaded=' + str('backend.providers' in sys.modules)); "
+        "import backend.mcp.mcp_server as server; "
+        "import backend.providers as providers; "
+        "print(providers.runtime_config.source_path); "
+        "print(server.runtime_config.source_path)"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", command],
+        cwd=Path(__file__).resolve().parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=True,
+    )
+
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    assert lines[-3:] == [
+        "providers_preloaded=False",
+        str(server_path.resolve()),
+        str(server_path.resolve()),
+    ]
+
+
+def test_mcp_server_rejects_a_process_that_preloaded_agent_config(tmp_path):
+    agent_path, server_path = _write_split_client_configs(tmp_path)
+    environment = os.environ.copy()
+    environment["DCS_AGENT_PLATFORM_CONFIG"] = str(agent_path)
+    environment["DCS_MCP_SERVER_PLATFORM_CONFIG"] = str(server_path)
+    command = (
+        "import backend.providers; "
+        "import backend.mcp.mcp_server"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", command],
+        cwd=Path(__file__).resolve().parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "providers loaded a different platform config" in result.stderr
+
+
+@pytest.mark.parametrize("credentials", [
+    {"single_tenant_bootstrap": True},
+    {"username": "client-user", "password": "client-password"},
+    {"session": "client-session"},
+])
+def test_mcp_server_rejects_client_credentials(tmp_path, credentials):
+    path = tmp_path / "server.json"
+    path.write_text(json.dumps({
+        "edme": {"auth_mode": "client", "ip": "edme.example.test", **credentials},
+    }), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="MCP Server client authentication config"):
+        load_runtime_config(path, component="mcp-server")
+
+
+def test_agent_can_start_with_unavailable_bootstrap_login(tmp_path):
+    path = tmp_path / "agent.json"
+    path.write_text(json.dumps({
+        "edme": {
+            "auth_mode": "client",
+            "single_tenant_bootstrap": True,
+            "ip": "edme.example.test",
+        },
+    }), encoding="utf-8")
+
+    config = load_runtime_config(path, component="agent")
+
+    assert config.edme.client_delegated
+    assert config.edme.bootstrap_login is None
+    repository = ConfiguredRepository(config)
+    assert repository.platform_status()["edme"] == "unavailable"
+    assert repository.platform_status()["storage"] == "unavailable"
+
+
+def test_expired_session_error_codes_are_normalized(tmp_path):
+    path = tmp_path / "platforms.json"
+    path.write_text(json.dumps({
+        "edme": {
+            "ip": "edme.example.test",
+            "session": "session",
+            "expired_session_error_codes": [" SESSION_EXPIRED ", 10042],
+        },
+    }), encoding="utf-8")
+
+    config = load_runtime_config(path)
+
+    assert config.edme.expired_session_error_codes == ("SESSION_EXPIRED", "10042")
+
+
+@pytest.mark.parametrize("codes", ["", "SESSION_EXPIRED", [""], [True], [{}]])
+def test_invalid_expired_session_error_codes_are_rejected(tmp_path, codes):
+    path = tmp_path / "platforms.json"
+    path.write_text(json.dumps({
+        "edme": {
+            "ip": "edme.example.test",
+            "session": "session",
+            "expired_session_error_codes": codes,
+        },
+    }), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="expired_session_error_codes"):
+        load_runtime_config(path)
 
 
 def test_remote_mcp_endpoint_is_decoupled_from_local_server_start(tmp_path):
@@ -211,6 +372,7 @@ def test_filling_in_the_example_config_the_obvious_way_starts_successfully(tmp_p
     })
     payload["edme"].update({
         "ip": "edme.example.internal",
+        "single_tenant_bootstrap": True,
         "username": "northbound-user",
         "password": "replace-me",
     })
@@ -279,6 +441,52 @@ def test_client_mode_without_the_bootstrap_flag_still_refuses_credentials(tmp_pa
     }), encoding="utf-8")
     with pytest.raises(ValueError, match="must not store platform credentials"):
         load_runtime_config(path)
+
+
+def test_mcp_server_example_is_credential_free_and_loadable():
+    config = load_runtime_config(
+        REPOSITORY_ROOT / "config" / "platforms.mcp-server.example.json",
+        component="mcp-server",
+    )
+
+    assert not config.fusioncompute.configured
+    assert config.edme.client_delegated
+    assert not config.edme.has_sensitive_credentials
+    assert config.edme.ip == "192.0.2.30"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="start-demo.ps1 is Windows-only")
+def test_start_demo_empty_client_template_stays_mock_and_honors_legacy_fallback(tmp_path):
+    legacy_path = tmp_path / "legacy-platforms.json"
+    legacy_path.write_text(
+        (REPOSITORY_ROOT / "config" / "platforms.example.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.pop("DCS_AGENT_PLATFORM_CONFIG", None)
+    env.pop("DCS_MCP_SERVER_PLATFORM_CONFIG", None)
+    env["DCS_PLATFORM_CONFIG"] = str(legacy_path)
+
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-File",
+            str(REPOSITORY_ROOT / "start-demo.ps1"),
+            "-ValidateOnly",
+        ],
+        cwd=REPOSITORY_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    assert Path(result["agent_platform_config"]) == legacy_path
+    assert Path(result["mcp_server_platform_config"]) == legacy_path
+    assert result["client_delegated_edme"] is False
+    assert result["mcp_server_config_available"] is True
 
 
 # --- Test-suite determinism --------------------------------------------------

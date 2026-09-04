@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from backend.adapters.edme import PlatformPermissionDeniedError
 from backend.app import app
 from backend.mcp.schemas import ToolRequest
 from backend.agent.copilot import verify_resource_claims
@@ -7,6 +8,7 @@ from backend.mcp.tools import TOOL_REGISTRY, call_tool
 from backend.memory.context_manager import TOKEN_THRESHOLD
 from backend.memory.database import memory_db
 import backend.app as app_module
+import backend.mcp.tools as tools_module
 
 
 client = TestClient(app)
@@ -203,6 +205,28 @@ def test_tool_audit_is_persisted():
     response = call_tool(_tool_request("list_alarms", {}, "audit-test"))
     records = memory_db.list_tool_audit(20)
     assert any(item["audit_id"] == response.audit_id and item["task_id"] == "audit-test" for item in records)
+
+
+def test_edme_403_returns_permission_denied_and_is_audited(monkeypatch):
+    def deny(*_args, **_kwargs):
+        raise PlatformPermissionDeniedError("vendor payload must not escape")
+
+    monkeypatch.setattr(tools_module.repo, "edme_resource_instances", deny)
+    response = call_tool(_tool_request(
+        "query_edme_resources",
+        {},
+        "audit-edme-permission-denied",
+    ))
+
+    assert response.success is False
+    assert response.error_code == "PERMISSION_DENIED"
+    assert response.error_msg == "当前 eDME 业务账号权限不足"
+    records = memory_db.list_tool_audit(50, "gateway-test-tenant")
+    assert any(
+        item["audit_id"] == response.audit_id
+        and item["error_code"] == "PERMISSION_DENIED"
+        for item in records
+    )
 
 
 def test_prometheus_metrics_are_exposed():

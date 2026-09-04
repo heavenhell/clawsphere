@@ -129,6 +129,23 @@ class ApprovalStore:
             if cursor.rowcount != 1:
                 raise RuntimeError("approval is not in an executable state")
 
+    def invalidate(self, task_id: str, reason: str) -> bool:
+        """Consume an approved write authorization that must not be replayed."""
+        now = datetime.now(timezone.utc).isoformat()
+        with memory_db.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE approvals
+                SET status = 'invalidated', decision_reason = ?, decided_at = ?
+                WHERE task_id = ? AND status = 'approved'
+                """,
+                (reason, now, task_id),
+            )
+        if cursor.rowcount:
+            memory_db.release_tool_rate_slots(task_id)
+            return True
+        return False
+
     @staticmethod
     def _decode(row) -> dict[str, Any]:
         item = dict(row)

@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
+from backend.adapters.edme import PlatformAuthExpiredError, PlatformPermissionDeniedError
 from backend.guardrails.permission import has_allowed_role
 from backend.guardrails.approvals import approval_store
 from backend.mcp.auth import AuthContext
@@ -45,7 +46,7 @@ from backend.observability import TOOL_CALLS, TOOL_LATENCY
 # HITL pause.
 # v2: added search_session_history (long-term memory recall).
 # v3: widened id patterns (cluster/pool/alarm) to accept real eDME ids (urn:/hex).
-TOOL_CATALOG_VERSION = 3
+TOOL_CATALOG_VERSION = 4
 TOOL_METADATA_KEY = "com.clawsphere/tool"
 
 
@@ -64,6 +65,7 @@ class ToolSpec:
     # a model-supplied parameter. `_caller` is not part of input_model, so it
     # never appears in the schema handed to the model and cannot be spoofed.
     needs_caller: bool = False
+    retry_on_auth_expiry: bool = False
 
 
 TOOL_REGISTRY: dict[str, ToolSpec] = {}
@@ -78,6 +80,7 @@ def mcp_tool(
     category: str = "general",
     tags: list[str] | None = None,
     needs_caller: bool = False,
+    retry_on_auth_expiry: bool = False,
 ):
     def decorator(fn: Callable[..., Any]):
         TOOL_REGISTRY[name] = ToolSpec(
@@ -90,12 +93,13 @@ def mcp_tool(
             category=category,
             tags=tags or [],
             needs_caller=needs_caller,
+            retry_on_auth_expiry=retry_on_auth_expiry,
         )
         return fn
     return decorator
 
 
-@mcp_tool("list_alarms", "查询当前活动告警", AlarmListParams, category="alert", tags=["alarm", "fusioncompute"])
+@mcp_tool("list_alarms", "查询当前活动告警", AlarmListParams, category="alert", tags=["alarm", "fusioncompute"], retry_on_auth_expiry=True)
 def list_alarms(severity: str | None = None):
     alarms = [alarm for alarm in repo.alarms() if alarm.get("status") == "active"]
     if severity:
@@ -108,6 +112,7 @@ def list_alarms(severity: str | None = None):
     "查询 DCS/FusionCompute 资源总览",
     category="resource",
     tags=["overview", "aggregate", "fusioncompute"],
+    retry_on_auth_expiry=True,
 )
 def get_resource_overview():
     return {
@@ -127,6 +132,7 @@ def get_resource_overview():
     AlarmDetailParams,
     category="alert",
     tags=["alarm", "detail", "fusioncompute"],
+    retry_on_auth_expiry=True,
 )
 def get_alarm_detail(alarm_id: str):
     alarm = next((a for a in repo.alarms() if a["id"] == alarm_id), None)
@@ -145,7 +151,7 @@ def get_alarm_detail(alarm_id: str):
     return {"alarm": alarm, "related": related}
 
 
-@mcp_tool("list_clusters", "查询集群列表和容量概览", category="resource", tags=["cluster", "fusioncompute"])
+@mcp_tool("list_clusters", "查询集群列表和容量概览", category="resource", tags=["cluster", "fusioncompute"], retry_on_auth_expiry=True)
 def list_clusters():
     return repo.clusters()
 
@@ -156,6 +162,7 @@ def list_clusters():
     ClusterCapacityParams,
     category="capacity",
     tags=["cluster", "capacity", "fusioncompute"],
+    retry_on_auth_expiry=True,
 )
 def get_cluster_capacity(cluster_id: str):
     cluster = next((c for c in repo.clusters() if c["id"] == cluster_id), None)
@@ -181,7 +188,7 @@ def get_cluster_capacity(cluster_id: str):
     }
 
 
-@mcp_tool("list_vms", "查询虚拟机列表", VmListParams, category="resource", tags=["vm", "fusioncompute"])
+@mcp_tool("list_vms", "查询虚拟机列表", VmListParams, category="resource", tags=["vm", "fusioncompute"], retry_on_auth_expiry=True)
 def list_vms(status: str | None = None):
     vms = repo.vms()
     if status:
@@ -195,6 +202,7 @@ def list_vms(status: str | None = None):
     VmDetailParams,
     category="resource",
     tags=["vm", "detail", "fusioncompute"],
+    retry_on_auth_expiry=True,
 )
 def get_vm_detail(vm_id: str):
     vm = next((item for item in repo.vms() if item["id"] == vm_id or item["name"] == vm_id), None)
@@ -210,6 +218,7 @@ def get_vm_detail(vm_id: str):
     VmMetricsParams,
     category="performance",
     tags=["vm", "metrics", "performance", "fusioncompute"],
+    retry_on_auth_expiry=True,
 )
 def get_vm_metrics(vm_id: str, metric_names: list[str] | None = None, time_range: str = "1h"):
     detail = get_vm_detail(vm_id)
@@ -228,6 +237,7 @@ def get_vm_metrics(vm_id: str, metric_names: list[str] | None = None, time_range
     ForecastParams,
     category="capacity",
     tags=["forecast", "capacity", "cluster"],
+    retry_on_auth_expiry=True,
 )
 def run_capacity_forecast(cluster_id: str, forecast_days: int = 30):
     capacity = get_cluster_capacity(cluster_id)
@@ -252,6 +262,7 @@ def run_capacity_forecast(cluster_id: str, forecast_days: int = 30):
     StoragePoolParams,
     category="resource",
     tags=["storage", "dorado"],
+    retry_on_auth_expiry=True,
 )
 def get_storage_pool_usage(pool_id: str | None = None):
     return repo.storage_pool_usage(pool_id)
@@ -263,6 +274,7 @@ def get_storage_pool_usage(pool_id: str | None = None):
     EdmeAlarmParams,
     category="alert",
     tags=["alarm", "edme"],
+    retry_on_auth_expiry=True,
 )
 def query_edme_current_alarms(severity: int | None = None, iterator: str | None = None):
     return repo.edme_current_alarms(severity, iterator)
@@ -274,6 +286,7 @@ def query_edme_current_alarms(severity: int | None = None, iterator: str | None 
     EdmeResourceParams,
     category="resource",
     tags=["edme", "resource"],
+    retry_on_auth_expiry=True,
 )
 def query_edme_resources(class_name: str = "SYS_StorageDevice", page_no: int = 1, page_size: int = 20):
     return repo.edme_resource_instances(class_name, page_no, page_size)
@@ -285,6 +298,7 @@ def query_edme_resources(class_name: str = "SYS_StorageDevice", page_no: int = 1
     EdmeMetricCatalogParams,
     category="performance",
     tags=["edme", "metric", "catalog"],
+    retry_on_auth_expiry=True,
 )
 def get_edme_metric_catalog(object_type_id: int | None = None):
     return {
@@ -299,6 +313,7 @@ def get_edme_metric_catalog(object_type_id: int | None = None):
     EdmeHistoryParams,
     category="performance",
     tags=["edme", "metric", "history"],
+    retry_on_auth_expiry=True,
 )
 def query_edme_performance_history(
     object_ids: list[str] | None = None,
@@ -319,6 +334,7 @@ def query_edme_performance_history(
     category="history",
     tags=["历史", "以前", "上次", "记录", "处置", "复盘", "history", "past", "previous"],
     needs_caller=True,
+    retry_on_auth_expiry=True,
 )
 def search_session_history(
     resource_id: str | None = None,
@@ -448,7 +464,11 @@ def tool_catalog_tier1(roles: list[str]) -> str:
     )
 
 
-def call_tool(request: ToolRequest) -> ToolResponse:
+def call_tool(
+    request: ToolRequest,
+    *,
+    preflight_error_code: str | None = None,
+) -> ToolResponse:
     started = perf_counter()
     audit_id = str(uuid4())
     spec = TOOL_REGISTRY.get(request.tool_name)
@@ -470,7 +490,16 @@ def call_tool(request: ToolRequest) -> ToolResponse:
             audit_id=audit_id,
         )
 
-    if not spec:
+    if preflight_error_code not in {None, "PLATFORM_AUTH_EXPIRED"}:
+        raise ValueError("unsupported tool preflight error")
+    if preflight_error_code == "PLATFORM_AUTH_EXPIRED":
+        tool_response = response(
+            False,
+            error_code="PLATFORM_AUTH_EXPIRED",
+            error_msg="eDME 平台认证已失效",
+        )
+        risk_level = spec.risk if spec else "unknown"
+    elif not spec:
         tool_response = response(False, error_code="TOOL_NOT_FOUND", error_msg="工具不存在")
         risk_level = "unknown"
     elif not has_allowed_role(request.caller_roles, spec.auth_roles):
@@ -559,6 +588,18 @@ def call_tool(request: ToolRequest) -> ToolResponse:
                 tool_response = response(True, data=data)
             else:
                 tool_response = response(True, data=invoke(params))
+        except PlatformAuthExpiredError:
+            tool_response = response(
+                False,
+                error_code="PLATFORM_AUTH_EXPIRED",
+                error_msg="eDME 平台认证已失效",
+            )
+        except PlatformPermissionDeniedError:
+            tool_response = response(
+                False,
+                error_code="PERMISSION_DENIED",
+                error_msg="当前 eDME 业务账号权限不足",
+            )
         except (TypeError, ValidationError) as exc:
             tool_response = response(False, error_code="SCHEMA_VALIDATION_FAILED", error_msg=str(exc))
         except ValueError as exc:

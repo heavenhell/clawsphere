@@ -50,6 +50,11 @@ class PlatformDelegation:
     access_session: str
     session_id: str
     expires_at: int
+    endpoint_fingerprint: str
+
+
+class PlatformDelegationExpiredError(PermissionError):
+    """A correctly transported delegation JWT has crossed its expiry."""
 
 
 def issue_demo_token(user_id: str = "demo-user", roles: list[str] | None = None, tenant_id: str = "demo-tenant") -> str:
@@ -139,6 +144,7 @@ def issue_platform_delegation_token(
     access_session: str,
     session_id: str,
     expires_at: int,
+    endpoint_fingerprint: str,
 ) -> str:
     """Wrap a platform session for one authenticated user and tenant.
 
@@ -150,6 +156,10 @@ def issue_platform_delegation_token(
         raise ValueError("invalid platform access session")
     if expires_at <= int(now.timestamp()):
         raise ValueError("platform access session has expired")
+    if len(endpoint_fingerprint) != 64 or any(
+        character not in "0123456789abcdef" for character in endpoint_fingerprint
+    ):
+        raise ValueError("invalid platform endpoint fingerprint")
     return jwt.encode(
         {
             "sub": auth.user_id,
@@ -157,6 +167,7 @@ def issue_platform_delegation_token(
             "platform_id": platform_id,
             "access_session": access_session,
             "session_id": session_id,
+            "endpoint_fingerprint": endpoint_fingerprint,
             "iss": MCP_PLATFORM_TOKEN_ISSUER,
             "aud": MCP_PLATFORM_TOKEN_AUDIENCE,
             "iat": now,
@@ -170,6 +181,7 @@ def issue_platform_delegation_token(
 def decode_platform_delegation_token(
     token: str,
     expected_auth: AuthContext | None = None,
+    expected_endpoint_fingerprint: str | None = None,
 ) -> PlatformDelegation:
     try:
         payload: dict[str, Any] = jwt.decode(
@@ -178,8 +190,13 @@ def decode_platform_delegation_token(
             algorithms=[JWT_ALGORITHM],
             audience=MCP_PLATFORM_TOKEN_AUDIENCE,
             issuer=MCP_PLATFORM_TOKEN_ISSUER,
-            options={"require": ["sub", "tenant_id", "platform_id", "access_session", "session_id", "exp"]},
+            options={"require": [
+                "sub", "tenant_id", "platform_id", "access_session", "session_id",
+                "endpoint_fingerprint", "exp",
+            ]},
         )
+    except jwt.ExpiredSignatureError as exc:
+        raise PlatformDelegationExpiredError("平台委托令牌已过期") from exc
     except jwt.PyJWTError as exc:
         raise PermissionError("无效或已过期的平台委托令牌") from exc
     auth = AuthContext(
@@ -194,16 +211,24 @@ def decode_platform_delegation_token(
     platform_id = str(payload.get("platform_id") or "")
     access_session = str(payload.get("access_session") or "")
     session_id = str(payload.get("session_id") or "")
+    endpoint_fingerprint = str(payload.get("endpoint_fingerprint") or "")
     if platform_id != "edme" or not access_session or len(access_session) > 8192:
         raise PermissionError("平台委托令牌内容无效")
     if not 8 <= len(session_id) <= 128:
         raise PermissionError("平台委托令牌缺少有效 session_id")
+    if len(endpoint_fingerprint) != 64 or any(
+        character not in "0123456789abcdef" for character in endpoint_fingerprint
+    ):
+        raise PermissionError("平台委托令牌缺少有效 endpoint 指纹")
+    if expected_endpoint_fingerprint and endpoint_fingerprint != expected_endpoint_fingerprint:
+        raise PermissionError("平台委托令牌目标与 MCP Server eDME 配置不匹配")
     return PlatformDelegation(
         auth=auth,
         platform_id=platform_id,
         access_session=access_session,
         session_id=session_id,
         expires_at=int(payload["exp"]),
+        endpoint_fingerprint=endpoint_fingerprint,
     )
 
 

@@ -1,22 +1,45 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 from uuid import uuid4
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.lowlevel.server import NotificationOptions
 
-from backend.mcp.schemas import ToolRequest
-from backend.mcp.tools import TOOL_METADATA_KEY, TOOL_REGISTRY, call_tool
-from backend.mcp.auth import (
-    MCP_CALLER_TOKEN_META_KEY,
-    MCP_PLATFORM_CREDENTIAL_HEADER,
-    decode_mcp_caller_token,
-    decode_platform_delegation_token,
-    get_mcp_auth_context,
-)
-from backend.providers import delegated_edme_repository, runtime_config, use_repository
+from backend.platform_config import load_runtime_config
 
+
+runtime_config = load_runtime_config(component="mcp-server")
+_previous_runtime_component = os.environ.get("DCS_RUNTIME_COMPONENT")
+os.environ["DCS_RUNTIME_COMPONENT"] = "mcp-server"
+
+try:
+    from backend.mcp.schemas import ToolRequest
+    from backend.mcp.tools import TOOL_METADATA_KEY, TOOL_REGISTRY, call_tool
+    from backend.mcp.auth import (
+        MCP_CALLER_TOKEN_META_KEY,
+        MCP_PLATFORM_CREDENTIAL_HEADER,
+        PlatformDelegationExpiredError,
+        decode_mcp_caller_token,
+        decode_platform_delegation_token,
+        get_mcp_auth_context,
+    )
+    from backend.providers import (
+        delegated_edme_repository,
+        runtime_config as provider_runtime_config,
+        use_repository,
+    )
+finally:
+    if _previous_runtime_component is None:
+        os.environ.pop("DCS_RUNTIME_COMPONENT", None)
+    else:
+        os.environ["DCS_RUNTIME_COMPONENT"] = _previous_runtime_component
+
+if provider_runtime_config != runtime_config:
+    raise RuntimeError(
+        "MCP Server cannot start after providers loaded a different platform config"
+    )
 
 mcp = FastMCP(
     "ClawSphere DCS Operations",
@@ -66,7 +89,11 @@ def _platform_delegation_from_context(ctx: Context, auth: Any):
         return None
     if not runtime_config.edme.client_delegated:
         raise PermissionError("MCP Server 未启用客户端平台委托鉴权")
-    return decode_platform_delegation_token(token, auth)
+    return decode_platform_delegation_token(
+        token,
+        auth,
+        runtime_config.edme.endpoint_fingerprint(26335),
+    )
 
 
 def _call(
@@ -95,11 +122,17 @@ def _call(
         tenant_id=auth.tenant_id,
         task_id=effective_task_id,
     )
-    delegation = _platform_delegation_from_context(ctx, auth) if ctx is not None else None
+    try:
+        delegation = _platform_delegation_from_context(ctx, auth) if ctx is not None else None
+    except PlatformDelegationExpiredError:
+        return call_tool(
+            request,
+            preflight_error_code="PLATFORM_AUTH_EXPIRED",
+        ).model_dump(mode="json")
     if delegation is None:
         response = call_tool(request)
     else:
-        repository = delegated_edme_repository(delegation.access_session)
+        repository = delegated_edme_repository(delegation.access_session, runtime_config)
         try:
             with use_repository(repository):
                 response = call_tool(request)
@@ -294,6 +327,7 @@ def _attach_tool_metadata() -> None:
                 "auth_roles": spec.auth_roles,
                 "category": spec.category,
                 "tags": spec.tags,
+                "retry_on_auth_expiry": spec.retry_on_auth_expiry,
             },
         }
 

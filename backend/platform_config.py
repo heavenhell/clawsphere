@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from hashlib import sha256
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,8 @@ from urllib.parse import urlparse
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+AGENT_CONFIG_ENV = 'DCS_AGENT_PLATFORM_CONFIG'
+MCP_SERVER_CONFIG_ENV = 'DCS_MCP_SERVER_PLATFORM_CONFIG'
 DEFAULT_CONFIG_PATH = ROOT_DIR / "config" / "platforms.json"
 
 
@@ -25,6 +28,7 @@ class PlatformCredentials:
     verify_ssl: bool | None = None
     auth_mode: str = "server"
     single_tenant_bootstrap: bool = False
+    expired_session_error_codes: tuple[str, ...] = ()
 
     @property
     def configured(self) -> bool:
@@ -48,10 +52,10 @@ class PlatformCredentials:
                         "single-tenant bootstrap logs in at runtime; "
                         "store username and password rather than a session"
                     )
+                if has_username != has_password:
+                    raise ValueError("single_tenant_bootstrap requires both username and password")
                 if (has_username or has_password) and not ip:
                     raise ValueError("platform ip is required when authentication is configured")
-                if ip and not (has_username and has_password):
-                    raise ValueError("single_tenant_bootstrap requires both username and password")
             elif has_session or has_username or has_password:
                 raise ValueError("client authentication mode must not store platform credentials")
             return False
@@ -78,6 +82,10 @@ class PlatformCredentials:
         return bool(self.username.strip() and self.password)
 
     @property
+    def has_sensitive_credentials(self) -> bool:
+        return bool(self.username.strip() or self.password or self.session.strip())
+
+    @property
     def bootstrap_login(self) -> tuple[str, str] | None:
         """The single tenant's configured platform login, when one is set.
 
@@ -93,6 +101,18 @@ class PlatformCredentials:
         if address.startswith(("http://", "https://")):
             return address
         return f"https://{address}:{self.port or default_port}"
+
+    def endpoint_fingerprint(self, default_port: int) -> str:
+        '''Bind delegated credentials to one normalized platform origin.'''
+        parsed = urlparse(self.base_url(default_port))
+        scheme = parsed.scheme.lower()
+        hostname = (parsed.hostname or '').lower()
+        port = parsed.port or (443 if scheme == 'https' else 80)
+        if not scheme or not hostname:
+            raise ValueError('platform endpoint must be an absolute origin')
+        host = f'[{hostname}]' if ':' in hostname else hostname
+        origin = f'{scheme}://{host}:{port}'
+        return sha256(origin.encode('utf-8')).hexdigest()
 
     @property
     def verify(self) -> bool | str:
@@ -137,6 +157,17 @@ class RuntimeConfig:
 
 def _credentials(payload: dict[str, Any] | None, platform_id: str) -> PlatformCredentials:
     data = payload or {}
+    expired_codes = data.get("expired_session_error_codes", [])
+    if expired_codes is None:
+        expired_codes = []
+    if not isinstance(expired_codes, list) or any(
+        isinstance(code, bool)
+        or not isinstance(code, (str, int))
+        or not str(code).strip()
+        or len(str(code)) > 128
+        for code in expired_codes
+    ):
+        raise ValueError("expired_session_error_codes must be a list of non-empty codes")
     credentials = PlatformCredentials(
         auth_mode=str(data.get("auth_mode") or "server"),
         single_tenant_bootstrap=bool(data.get("single_tenant_bootstrap", False)),
@@ -149,6 +180,7 @@ def _credentials(payload: dict[str, Any] | None, platform_id: str) -> PlatformCr
         site_id=str(data["site_id"]) if data.get("site_id") else None,
         api_version=str(data["api_version"]) if data.get("api_version") else None,
         verify_ssl=bool(data["verify_ssl"]) if data.get("verify_ssl") is not None else None,
+        expired_session_error_codes=tuple(str(code).strip() for code in expired_codes),
     )
     if credentials.auth_mode.strip().lower() == "client" and platform_id != "edme":
         raise ValueError("client authentication mode is currently supported only for eDME")
@@ -157,13 +189,32 @@ def _credentials(payload: dict[str, Any] | None, platform_id: str) -> PlatformCr
     return credentials
 
 
-def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
-    source = Path(path or os.getenv("DCS_PLATFORM_CONFIG") or DEFAULT_CONFIG_PATH).expanduser().resolve()
+def load_runtime_config(
+    path: str | Path | None = None,
+    *,
+    component: str = "agent",
+) -> RuntimeConfig:
+    normalized_component = component.strip().lower()
+    if normalized_component not in {"agent", "mcp-server"}:
+        raise ValueError("component must be either 'agent' or 'mcp-server'")
+    component_env = MCP_SERVER_CONFIG_ENV if normalized_component == "mcp-server" else AGENT_CONFIG_ENV
+    source = Path(
+        path or os.getenv(component_env) or os.getenv("DCS_PLATFORM_CONFIG") or DEFAULT_CONFIG_PATH
+    ).expanduser().resolve()
     payload: dict[str, Any] = {}
     if source.exists():
         payload = json.loads(source.read_text(encoding="utf-8"))
     fusioncompute = _credentials(payload.get("fusioncompute"), "fusioncompute")
     edme = _credentials(payload.get("edme"), "edme")
+    if (
+        normalized_component == "mcp-server"
+        and edme.auth_mode.strip().lower() == "client"
+        and (edme.single_tenant_bootstrap or edme.has_sensitive_credentials)
+    ):
+        raise ValueError(
+            "MCP Server client authentication config must not contain platform credentials "
+            "or enable single_tenant_bootstrap"
+        )
     if edme.client_delegated:
         edme_url = urlparse(edme.base_url(26335))
         if edme_url.username or edme_url.password:

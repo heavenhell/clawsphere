@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from contextlib import asynccontextmanager
 from typing import Callable, TypeVar
 
@@ -18,18 +19,30 @@ from backend.agent.copilot import (
     run_copilot,
 )
 from backend.agent.llm import get_public_llm_status
+from backend.adapters.edme import PlatformAuthExpiredError
 from backend.guardrails.approvals import approval_store
 from backend.guardrails.chat_limits import chat_limiter
 from backend.mcp.auth import DEMO_MODE, AuthContext, get_auth_context, issue_demo_token
+from backend.mcp.gateway import get_tool_gateway
 from backend.memory.store import list_memory_writes
 from backend.memory.database import memory_db
 from backend.mcp.schemas import GatewayToolRequest, ToolRequest
-from backend.mcp.tools import TOOL_REGISTRY, call_tool
+from backend.mcp.tools import TOOL_REGISTRY
 from backend.mock.api import router as mock_router
 from backend.platform_sessions import PlatformSessionRateLimitError, platform_session_broker
 from backend.providers import delegated_edme_repository, repo, runtime_config, use_repository
-from backend.observability import APPROVAL_DECISIONS, HTTP_LATENCY, HTTP_REQUESTS, INTENT_COUNT, create_metrics_app
+from backend.observability import (
+    APPROVAL_DECISIONS,
+    HTTP_LATENCY,
+    HTTP_REQUESTS,
+    INTENT_COUNT,
+    MCP_CLIENT_EVENTS,
+    create_metrics_app,
+)
 from backend.memory.retriever import ensure_knowledge_seeded
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ChatRequest(BaseModel):
@@ -118,7 +131,12 @@ def llm_status(_auth: AuthContext = Depends(get_auth_context)):
 @app.get("/api/overview")
 def overview(auth: AuthContext = Depends(get_auth_context)):
     # Resolve the repository proxy only after the per-request context is set.
-    return _with_client_platform(auth, lambda: repo.overview())
+    return _with_client_platform(
+        auth,
+        lambda: repo.overview(),
+        retry_on_auth_expiry=True,
+        operation_name="overview",
+    )
 
 
 @app.get("/api/platform-status")
@@ -196,18 +214,48 @@ def disconnect_edme(auth: AuthContext = Depends(get_auth_context)):
 T = TypeVar("T")
 
 
-def _with_client_platform(auth: AuthContext, operation: Callable[[], T]) -> T:
+def _with_client_platform(
+    auth: AuthContext,
+    operation: Callable[[], T],
+    *,
+    retry_on_auth_expiry: bool = False,
+    operation_name: str = "direct_api",
+) -> T:
     if not runtime_config.edme.client_delegated:
         return operation()
     session = platform_session_broker.ensure_session(auth)
     if session is None:
         raise HTTPException(status_code=409, detail="当前用户尚未连接 eDME")
-    repository = delegated_edme_repository(session.access_session)
+
+    def execute(access_session: str) -> T:
+        repository = delegated_edme_repository(access_session)
+        try:
+            with use_repository(repository):
+                return operation()
+        finally:
+            repository.close()
+
     try:
-        with use_repository(repository):
-            return operation()
-    finally:
-        repository.close()
+        return execute(session.access_session)
+    except PlatformAuthExpiredError:
+        if not retry_on_auth_expiry:
+            raise
+        try:
+            refreshed = platform_session_broker.refresh(
+                auth,
+                stale_session_id=session.session_id,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="eDME 平台认证刷新失败") from exc
+        MCP_CLIENT_EVENTS.labels("platform_auth_read_retried").inc()
+        LOGGER.info("platform_auth_read_retried route=%s", operation_name)
+        try:
+            return execute(refreshed.access_session)
+        except PlatformAuthExpiredError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="eDME 平台认证刷新后仍然失效",
+            ) from exc
 
 
 @app.post("/api/tools/call")
@@ -220,7 +268,9 @@ def tool_call(request: GatewayToolRequest, auth: AuthContext = Depends(get_auth_
         caller_roles=auth.roles,
         tenant_id=auth.tenant_id,
     )
-    return _with_client_platform(auth, lambda: call_tool(tool_request))
+    gateway = get_tool_gateway()
+    snapshot = gateway.catalog(auth)
+    return gateway.call(tool_request, snapshot.version)
 
 
 @app.post("/api/chat")

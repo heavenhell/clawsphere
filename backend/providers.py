@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import replace
@@ -147,14 +148,25 @@ class ConfiguredRepository(FusionComputeInterface, DoradoInterface, EDMEInterfac
         }
 
     def platform_status(self) -> dict[str, Any]:
+        if (
+            self.config.edme.client_delegated
+            and self.config.edme.single_tenant_bootstrap
+            and self.config.edme.bootstrap_login is None
+        ):
+            edme_status = "unavailable"
+        elif self.config.edme.client_delegated:
+            edme_status = "client-delegated"
+        elif self.config.edme.configured:
+            edme_status = "real"
+        else:
+            edme_status = "mock"
         return {
             "fusioncompute": "real" if self.config.fusioncompute.configured else "mock",
-            "edme": (
-                "client-delegated" if self.config.edme.client_delegated
-                else "real" if self.config.edme.configured else "mock"
-            ),
-            "storage": "edme" if self.config.edme.available else (
-                "fusioncompute" if self.config.fusioncompute.configured else "mock"
+            "edme": edme_status,
+            "storage": "unavailable" if edme_status == "unavailable" else (
+                "edme" if self.config.edme.available else (
+                    "fusioncompute" if self.config.fusioncompute.configured else "mock"
+                )
             ),
             "mock_api_exposed": self.config.expose_mock_api,
             "mcp": {
@@ -202,18 +214,24 @@ def use_repository(repository: ConfiguredRepository):
         _repository_context.reset(token)
 
 
-def delegated_edme_repository(access_session: str) -> ConfiguredRepository:
-    if not runtime_config.edme.client_delegated:
+def delegated_edme_repository(
+    access_session: str,
+    config: RuntimeConfig | None = None,
+) -> ConfiguredRepository:
+    effective_config = config or runtime_config
+    if not effective_config.edme.client_delegated:
         raise RuntimeError("eDME 未配置为客户端委托鉴权模式")
     edme = replace(
-        runtime_config.edme,
+        effective_config.edme,
         auth_mode="server",
         username="",
         password="",
         session=access_session,
     )
-    return ConfiguredRepository(replace(runtime_config, edme=edme))
+    return ConfiguredRepository(replace(effective_config, edme=edme))
 
 
-runtime_config = load_runtime_config()
+runtime_config = load_runtime_config(
+    component=os.getenv("DCS_RUNTIME_COMPONENT", "agent")
+)
 repo = RepositoryProxy(ConfiguredRepository(runtime_config))

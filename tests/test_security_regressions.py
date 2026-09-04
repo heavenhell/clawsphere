@@ -664,6 +664,24 @@ def test_approved_tool_must_match_approved_parameters():
     assert response.error_code == "APPROVAL_REQUIRED"
 
 
+def test_approved_write_can_be_invalidated_after_platform_auth_refresh():
+    task_id = f"approval-invalidated-{uuid4()}"
+    item = approval_store.create_or_get(
+        task_id,
+        task_id,
+        "maker",
+        "tenant-invalidate",
+        "restart approval",
+        [{"tool_name": "restart_vm", "params": {"vm_id": "vm-1001"}}],
+        "high",
+    )
+    approval_store.decide(item["id"], True, "checker", "approved")
+
+    assert approval_store.invalidate(task_id, "platform auth refreshed") is True
+    assert approval_store.get_by_task(task_id)["status"] == "invalidated"
+    assert approval_store.invalidate(task_id, "again") is False
+
+
 def test_llm_tool_plan_still_passes_rbac(monkeypatch):
     _propose(
         monkeypatch,

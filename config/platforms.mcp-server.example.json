@@ -8,9 +8,7 @@
   "edme": {
     "auth_mode": "client",
     "single_tenant_bootstrap": false,
-    "ip": "",
-    "username": "",
-    "password": "",
+    "ip": "192.0.2.30",
     "expired_session_error_codes": []
   },
   "mcp": {

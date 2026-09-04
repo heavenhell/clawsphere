@@ -127,6 +127,12 @@ function QueryApp() {
 
   const platformLabel = useMemo(() => {
     if (platformStatus?.fusioncompute === 'real' && platformStatus?.edme === 'real') return 'FC + eDME real';
+    if (platformStatus?.edme === 'unavailable') {
+      return platformStatus?.fusioncompute === 'real' ? 'FusionCompute real · eDME unavailable' : 'eDME unavailable';
+    }
+    if (platformStatus?.edme === 'client-delegated') {
+      return platformStatus?.fusioncompute === 'real' ? 'FC + eDME client delegated' : 'eDME client delegated';
+    }
     if (platformStatus?.fusioncompute === 'real') return 'FusionCompute real';
     if (platformStatus?.edme === 'real') return 'eDME real';
     return 'mock online';

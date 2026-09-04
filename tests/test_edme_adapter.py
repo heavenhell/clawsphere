@@ -23,7 +23,12 @@ import logging
 import httpx
 import pytest
 
-from backend.adapters.edme import EDMERestAdapter
+from backend.adapters.edme import (
+    EDMERestAdapter,
+    PlatformAuthExpiredError,
+    PlatformPermissionDeniedError,
+    acquire_edme_session,
+)
 from backend.platform_config import PlatformCredentials, load_runtime_config
 from backend.providers import ConfiguredRepository
 
@@ -379,6 +384,92 @@ def test_history_falls_back_to_storage_ids_when_resourcedb_is_denied():
     body = json.loads([r for r in seen if r.url.path.endswith("/action/query")][-1].content)
     assert body["obj_ids"] == ["storage-demo-1"]
     assert body["obj_type_id"] == 1001
+
+
+def test_plain_403_is_permission_denied_and_does_not_trigger_refresh():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(403, json={"error_code": "PERMISSION_DENIED"})
+
+    client = httpx.Client(base_url="https://edme.example.test", transport=httpx.MockTransport(handler))
+    adapter = EDMERestAdapter(
+        PlatformCredentials(ip="edme.example.test", session="valid-session"),
+        client=client,
+    )
+
+    with pytest.raises(PlatformPermissionDeniedError):
+        adapter.edme_resource_instances("SYS_StorageDevice")
+    assert len(seen) == 1
+
+
+def test_allowlisted_403_is_reported_as_expired_session():
+    client = httpx.Client(
+        base_url="https://edme.example.test",
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(403, json={"error_code": "SESSION_EXPIRED"})
+        ),
+    )
+    adapter = EDMERestAdapter(
+        PlatformCredentials(
+            ip="edme.example.test",
+            session="expired-session",
+            expired_session_error_codes=("SESSION_EXPIRED",),
+        ),
+        client=client,
+    )
+
+    with pytest.raises(PlatformAuthExpiredError):
+        adapter.edme_resource_instances("SYS_StorageDevice")
+
+
+def test_server_credential_refresh_does_not_replay_original_request():
+    paths = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("/sessions"):
+            return httpx.Response(200, json={"accessSession": "new-session", "expires": 600})
+        return httpx.Response(401, json={})
+
+    client = httpx.Client(base_url="https://edme.example.test", transport=httpx.MockTransport(handler))
+    adapter = EDMERestAdapter(
+        PlatformCredentials(
+            ip="edme.example.test",
+            username="server-user",
+            password="server-password",
+            session="old-session",
+        ),
+        client=client,
+    )
+
+    with pytest.raises(PlatformAuthExpiredError):
+        adapter.edme_resource_instances("SYS_StorageDevice")
+    assert paths.count("/rest/resourcedb/v1/instances/SYS_StorageDevice") == 1
+    assert paths.count("/rest/plat/smapp/v1/sessions") == 1
+    assert adapter._token == "new-session"
+
+
+@pytest.mark.parametrize("expires", [0, -1, True, "not-a-number"])
+def test_login_rejects_invalid_session_lifetime(expires):
+    client = httpx.Client(
+        base_url="https://edme.example.test",
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={"accessSession": "session", "expires": expires},
+            )
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid session lifetime"):
+        acquire_edme_session(
+            PlatformCredentials(ip="edme.example.test"),
+            "user",
+            "password",
+            client,
+        )
 
 
 # --- Repository routing ------------------------------------------------------

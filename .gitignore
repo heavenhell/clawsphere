@@ -4,6 +4,7 @@ __pycache__/
 .env
 /config/platforms.json
 /config/platforms.*.json
+!/config/platforms.*.example.json
 node_modules/
 dist/
 *.log
