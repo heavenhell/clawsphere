@@ -48,17 +48,18 @@ def _propose(
             "reason_summary": "test stub",
         },
     )
-    monkeypatch.setattr(
-        copilot,
-        "_call_tool_search_planner",
-        lambda *args, **kwargs: {
+    def search_once(history, tools):
+        if any("本轮工具观察" in item.get("content", "") for item in history):
+            return {"tool_calls": [], "reason": "enough observations"}
+        return {
             "tool_calls": [{
                 "tool_name": "ToolSearch",
                 "params": {"query": tool_name, "top_k": 5, "required_capabilities": []},
             }],
             "reason": "test stub",
-        },
-    )
+        }
+
+    monkeypatch.setattr(copilot, "_call_tool_search_planner", search_once)
     if bypass_rbac_search:
         # Patch what the real tool_catalog_search node calls internally
         # (retrieve_tools, _rbac_tool_catalog), not the node function itself.
@@ -359,7 +360,7 @@ def test_direct_answer_short_circuit_never_calls_tool_search_or_tool_call_planne
     assert not result["tool_calls"]
 
 
-def test_llm1_then_llm2_then_llm3_call_order_on_the_full_tool_path(monkeypatch):
+def test_tool_result_is_observed_before_the_agent_stops(monkeypatch):
     order: list[str] = []
 
     def spy_skill_router(*args, **kwargs):
@@ -373,8 +374,10 @@ def test_llm1_then_llm2_then_llm3_call_order_on_the_full_tool_path(monkeypatch):
             "reason_summary": "test stub",
         }
 
-    def spy_tool_search(*args, **kwargs):
+    def spy_tool_search(history, tools):
         order.append("tool_search_planner")
+        if any("本轮工具观察" in item.get("content", "") for item in history):
+            return {"tool_calls": [], "reason": "工具结果已足够"}
         return {
             "tool_calls": [{
                 "tool_name": "ToolSearch",
@@ -393,7 +396,12 @@ def test_llm1_then_llm2_then_llm3_call_order_on_the_full_tool_path(monkeypatch):
     # tool_catalog_search itself is real here (RBAC + BM25), unlike _propose's
     # default — this covers PR2's host function end-to-end too.
     run_copilot("现在有哪些告警", ["readonly"])
-    assert order == ["skill_router", "tool_search_planner", "tool_call_planner"]
+    assert order == [
+        "skill_router",
+        "tool_search_planner",
+        "tool_call_planner",
+        "tool_search_planner",
+    ]
 
 
 def test_route_decisions_records_one_structured_entry_per_planning_stage(monkeypatch):
@@ -405,13 +413,18 @@ def test_route_decisions_records_one_structured_entry_per_planning_stage(monkeyp
         "missing_context": [],
         "reason_summary": "skill reason",
     })
-    monkeypatch.setattr(copilot, "_call_tool_search_planner", lambda *args, **kwargs: {
-        "tool_calls": [{
-            "tool_name": "ToolSearch",
-            "params": {"query": "list_alarms", "top_k": 5, "required_capabilities": []},
-        }],
-        "reason": "",
-    })
+    def search_once(history, tools):
+        if any("本轮工具观察" in item.get("content", "") for item in history):
+            return {"tool_calls": [], "reason": "enough observations"}
+        return {
+            "tool_calls": [{
+                "tool_name": "ToolSearch",
+                "params": {"query": "list_alarms", "top_k": 5, "required_capabilities": []},
+            }],
+            "reason": "",
+        }
+
+    monkeypatch.setattr(copilot, "_call_tool_search_planner", search_once)
     monkeypatch.setattr(copilot, "_call_tool_call_planner", lambda *args, **kwargs: {
         "tool_calls": [{"tool_name": "list_alarms", "params": {}}], "reason": "call reason",
     })
@@ -419,14 +432,20 @@ def test_route_decisions_records_one_structured_entry_per_planning_stage(monkeyp
     result = run_copilot("现在有哪些告警", ["readonly"])
 
     stages = [entry["stage"] for entry in result["route_decisions"]]
-    assert stages == ["skill_router", "tool_search_planner", "tool_call_planner"]
-    skill_entry, search_entry, call_entry = result["route_decisions"]
+    assert stages == [
+        "skill_router",
+        "tool_search_planner",
+        "tool_call_planner",
+        "tool_search_planner",
+    ]
+    skill_entry, search_entry, call_entry, stop_entry = result["route_decisions"]
     assert skill_entry["decision"] == "use_skill"
     assert skill_entry["detail"]["skill_ids"] == ["resource_query"]
     assert search_entry["decision"] == "tool_search"
     assert search_entry["detail"]["query"] == "list_alarms"
     assert call_entry["decision"] == "tool_calls_proposed"
     assert call_entry["detail"]["tool_names"] == ["list_alarms"]
+    assert stop_entry["decision"] == "declined"
 
 
 def test_route_decisions_records_single_entry_on_direct_answer_short_circuit(monkeypatch):
@@ -479,8 +498,10 @@ def test_use_tool_directly_skips_skill_loader_but_reaches_tool_search(monkeypatc
             "reason_summary": "没有对应 Skill，但工具目录里有 list_alarms",
         }
 
-    def spy_tool_search(*args, **kwargs):
+    def spy_tool_search(history, tools):
         order.append("tool_search_planner")
+        if any("本轮工具观察" in item.get("content", "") for item in history):
+            return {"tool_calls": [], "reason": "enough observations"}
         return {
             "tool_calls": [{
                 "tool_name": "ToolSearch",
@@ -497,11 +518,86 @@ def test_use_tool_directly_skips_skill_loader_but_reaches_tool_search(monkeypatc
     monkeypatch.setattr(copilot, "_call_tool_search_planner", spy_tool_search)
     monkeypatch.setattr(copilot, "_call_tool_call_planner", spy_tool_call)
     result = run_copilot("现在有哪些告警", ["readonly"])
-    assert order == ["skill_router", "tool_search_planner", "tool_call_planner"]
+    assert order == [
+        "skill_router",
+        "tool_search_planner",
+        "tool_call_planner",
+        "tool_search_planner",
+    ]
     assert result["skill_decision"]["decision"] == "use_tool_directly"
     # skill_loader never ran on this path, so loaded_skills stayed at its
     # initial empty value — visible here via the synthesized retrieved_docs.
     assert result["retrieved_docs"] == []
+
+
+def test_agent_loop_can_execute_a_second_read_tool_after_observing_the_first(monkeypatch):
+    search_queries = iter(["list_alarms", "list_vms"])
+    proposed_tools = iter(["list_alarms", "list_vms"])
+
+    monkeypatch.setattr(copilot, "_call_skill_router", lambda *args, **kwargs: {
+        "decision": "use_skill",
+        "skill_ids": ["resource_query"],
+        "arguments": {},
+        "confidence": 0.9,
+        "missing_context": [],
+        "reason_summary": "需要关联告警与虚拟机",
+    })
+
+    def search(history, tools):
+        observations = [
+            item for item in history if "本轮工具观察" in item.get("content", "")
+        ]
+        if observations and "list_vms" in observations[-1]["content"]:
+            return {"tool_calls": [], "reason": "信息已足够"}
+        query = next(search_queries)
+        return {
+            "tool_calls": [{
+                "tool_name": "ToolSearch",
+                "params": {"query": query, "top_k": 5, "required_capabilities": []},
+            }],
+            "reason": f"检索 {query}",
+        }
+
+    def plan(history, tools):
+        tool_name = next(proposed_tools)
+        return {
+            "tool_calls": [{"tool_name": tool_name, "params": {}}],
+            "reason": f"调用 {tool_name}",
+        }
+
+    monkeypatch.setattr(copilot, "_call_tool_search_planner", search)
+    monkeypatch.setattr(copilot, "_call_tool_call_planner", plan)
+    result = run_copilot("关联当前告警和虚拟机", ["readonly"])
+
+    assert [item["tool_name"] for item in result["tool_results"]] == [
+        "list_alarms",
+        "list_vms",
+    ]
+    assert result["agent_tool_rounds"] == 2
+    assert result["tool_calls_executed"] == 2
+    assert result["agent_step_count"] <= copilot.MAX_LLM_CALLS_PER_TURN
+
+
+def test_agent_loop_stops_after_configured_tool_round_budget():
+    state = {
+        "agent_tool_rounds": copilot.MAX_AGENT_TOOL_ROUNDS,
+        "tool_calls_executed": 1,
+        "agent_step_count": 3,
+        "tool_calls_proposed": [{"tool_name": "list_alarms", "params": {}}],
+        "tool_catalog_source": "local",
+    }
+    assert copilot.route_after_tool_executor(state) == "llm_responder"
+
+
+def test_agent_loop_never_chains_after_an_approved_write():
+    state = {
+        "agent_tool_rounds": 1,
+        "tool_calls_executed": 1,
+        "agent_step_count": 3,
+        "tool_calls_proposed": [{"tool_name": "restart_vm", "params": _RESTART}],
+        "tool_catalog_source": "local",
+    }
+    assert copilot.route_after_tool_executor(state) == "llm_responder"
 
 
 def test_use_tool_directly_still_enforces_full_safety_spine(monkeypatch):
